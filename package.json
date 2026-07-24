@@ -1,0 +1,79 @@
+{
+  "name": "selection-assistant",
+  "version": "0.1.0",
+  "description": "独立的 Windows AI 划词助手",
+  "main": "./out/main/index.js",
+  "author": "v833 <2507301541@qq.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/v833/windows-selection-assistant#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/v833/windows-selection-assistant.git"
+  },
+  "bugs": {
+    "url": "https://github.com/v833/windows-selection-assistant/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "dist:win": "npm run build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "lucide-react": "^0.525.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "selection-hook": "2.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.5.2",
+    "electron": "41.8.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.4"
+  },
+  "build": {
+    "appId": "com.local.selectionassistant",
+    "productName": "划词助手",
+    "asarUnpack": [
+      "node_modules/selection-hook/**/*"
+    ],
+    "npmRebuild": false,
+    "files": [
+      "out/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      "resources/icon.png"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "win": {
+      "executableName": "SelectionAssistant",
+      "icon": "resources/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "划词助手"
+    }
+  }
+}
