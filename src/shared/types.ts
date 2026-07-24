@@ -1,4 +1,6 @@
 export type ThemeMode = 'system' | 'light' | 'dark'
+export type SettingsSection = 'general' | 'model' | 'actions' | 'about'
+export type AIErrorKind = 'authentication' | 'model' | 'rate_limit' | 'network' | 'timeout' | 'cancelled' | 'server' | 'configuration' | 'unknown'
 
 export type ActionKind = 'chat' | 'translate' | 'explain' | 'summarize' | 'rewrite' | 'writing' | 'extract' | 'analysis' | 'code' | 'custom'
 
@@ -42,6 +44,7 @@ export interface AppSettings {
   targetLanguage: string
   autoDictionary: boolean
   jsonExtractionSchema: string
+  maxInputCharacters: number
   showRecentActions: boolean
   recentActionIds: string[]
   resultWindowBounds: WindowBounds | null
@@ -67,6 +70,7 @@ export interface ActionPayload {
   selectedText: string
   programName: string
   model: string
+  maxInputCharacters: number
   theme: ThemeMode
 }
 
@@ -81,6 +85,16 @@ export interface AIStreamEvent {
   requestId: string
   type: 'start' | 'delta' | 'done' | 'error'
   content?: string
+  error?: AIErrorInfo
+}
+
+export interface AIErrorInfo {
+  kind: AIErrorKind
+  title: string
+  message: string
+  canRetry: boolean
+  openSettings: boolean
+  status?: number
 }
 
 export interface AppInfo {
@@ -100,6 +114,7 @@ export interface SelectionAssistantAPI {
   onSelectionChanged: (listener: (payload: SelectionPayload) => void) => () => void
   onActionPayload: (listener: (payload: ActionPayload) => void) => () => void
   onAIStream: (listener: (event: AIStreamEvent) => void) => () => void
+  onSettingsNavigate: (listener: (section: SettingsSection) => void) => () => void
   toolbarReady: () => void
   resultReady: () => void
   selectAction: (actionId: string, variantId?: string) => void
@@ -108,7 +123,8 @@ export interface SelectionAssistantAPI {
   runAI: (request: AIRunRequest) => void
   cancelAI: (requestId: string) => void
   copyText: (text: string) => Promise<void>
-  openSettings: () => void
+  openExternal: (url: string) => Promise<boolean>
+  openSettings: (section?: SettingsSection) => void
   closeWindow: () => void
   minimizeWindow: () => void
 }

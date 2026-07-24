@@ -125,6 +125,10 @@ export function resolveActionVariant(action: SelectionAction, variantId: string)
   }
 }
 
+export function getEnabledActionVariants(action: SelectionAction): ActionVariant[] {
+  return action.variants?.filter((variant) => variant.enabled) ?? []
+}
+
 export function isDictionaryCandidate(text: string): boolean {
   const normalized = text.trim()
   if (!normalized || normalized.length > 48 || /[\r\n。！？!?；;]/.test(normalized)) return false

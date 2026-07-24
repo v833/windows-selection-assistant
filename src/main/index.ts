@@ -7,12 +7,15 @@ import {
   Menu,
   nativeImage,
   screen,
+  shell,
   Tray,
   type MenuItemConstructorOptions
 } from 'electron'
 import { join } from 'node:path'
 import type { TextSelectionData } from 'selection-hook'
-import { resolveActionVariant } from '../shared/actions'
+import { getEnabledActionVariants, resolveActionVariant } from '../shared/actions'
+import { classifyAIError } from '../shared/aiErrors'
+import { sanitizeExternalUrl } from '../shared/markdown'
 import {
   normalizeShortcut,
   recordRecentAction,
@@ -27,6 +30,7 @@ import type {
   AssistantStatus,
   SelectionAction,
   SelectionPayload,
+  SettingsSection,
   WindowBounds
 } from '../shared/types'
 import { fitWindowBoundsToArea } from '../shared/windowBounds'
@@ -167,11 +171,16 @@ function createResultWindow(): BrowserWindow {
   return window
 }
 
-function showMainWindow(): void {
+function showMainWindow(section?: SettingsSection): void {
   mainWindow ??= createMainWindow()
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+  if (section) {
+    const sendSection = () => mainWindow?.webContents.send('settings:navigate', section)
+    if (mainWindow.webContents.isLoading()) mainWindow.webContents.once('did-finish-load', sendSection)
+    else sendSection()
+  }
 }
 
 function selectionPayload(): SelectionPayload | null {
@@ -200,18 +209,22 @@ function showAction(actionId: string, variantId?: string): void {
   const action = settings.actions.find((item) => item.id === actionId && item.enabled)
   if (!action) return
 
-  if (action.variants?.length && !variantId) {
-    const variants = action.variants.filter((variant) => variant.enabled)
+  let selectedVariantId = variantId
+  if (action.variants?.length && !selectedVariantId) {
+    const variants = getEnabledActionVariants(action)
     if (!variants.length) return
-    const menu = Menu.buildFromTemplate(
-      variants.map((variant) => ({ label: variant.label, click: () => showAction(action.id, variant.id) }))
-    )
-    if (toolbarWindow && !toolbarWindow.isDestroyed()) menu.popup({ window: toolbarWindow })
-    else menu.popup()
-    return
+    if (variants.length === 1) selectedVariantId = variants[0].id
+    else {
+      const menu = Menu.buildFromTemplate(
+        variants.map((variant) => ({ label: variant.label, click: () => showAction(action.id, variant.id) }))
+      )
+      if (toolbarWindow && !toolbarWindow.isDestroyed()) menu.popup({ window: toolbarWindow })
+      else menu.popup()
+      return
+    }
   }
 
-  const selectedAction = variantId ? resolveActionVariant(action, variantId) : action
+  const selectedAction = selectedVariantId ? resolveActionVariant(action, selectedVariantId) : action
   if (!selectedAction) return
 
   const isOverflowAction = splitToolbarActions(settings.actions).overflow.some((item) => item.id === action.id)
@@ -229,6 +242,7 @@ function showAction(actionId: string, variantId?: string): void {
     selectedText: lastSelection.text,
     programName: lastSelection.programName,
     model: settings.model,
+    maxInputCharacters: settings.maxInputCharacters,
     theme: settings.theme
   }
   toolbarWindow?.hide()
@@ -304,8 +318,8 @@ function persistSettingsSafely(patch: Partial<AppSettings>, operation: string): 
 }
 
 function actionMenuItem(action: SelectionAction): MenuItemConstructorOptions {
-  const variants = action.variants?.filter((variant) => variant.enabled)
-  if (variants?.length) {
+  const variants = getEnabledActionVariants(action)
+  if (variants.length > 1) {
     return {
       label: action.label,
       submenu: variants.map((variant) => ({
@@ -317,7 +331,7 @@ function actionMenuItem(action: SelectionAction): MenuItemConstructorOptions {
   return {
     label: action.label,
     ...(action.shortcut ? { accelerator: action.shortcut } : {}),
-    click: () => showAction(action.id)
+    click: () => showAction(action.id, variants[0]?.id)
   }
 }
 
@@ -413,7 +427,7 @@ function rebuildTrayMenu(): void {
   const settings = settingsStore.get()
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: '打开设置', click: showMainWindow },
+      { label: '打开设置', click: () => showMainWindow() },
       {
         label: '启用划词助手',
         type: 'checkbox',
@@ -439,7 +453,7 @@ function createTray(): void {
   const iconPath = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(process.cwd(), 'resources/icon.png')
   tray = new Tray(nativeImage.createFromPath(iconPath))
   tray.setToolTip('划词助手')
-  tray.on('double-click', showMainWindow)
+  tray.on('double-click', () => showMainWindow())
   rebuildTrayMenu()
 }
 
@@ -488,6 +502,12 @@ function registerIpc(): void {
   ipcMain.handle('ai:test', (_event, draft) => testConnection(draft))
   ipcMain.handle('app:info', () => ({ version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome }))
   ipcMain.handle('clipboard:write', (_event, text: string) => clipboard.writeText(text))
+  ipcMain.handle('external:open', async (_event, value: unknown) => {
+    const url = sanitizeExternalUrl(typeof value === 'string' ? value : undefined)
+    if (!url) return false
+    await shell.openExternal(url)
+    return true
+  })
 
   ipcMain.on('toolbar:ready', () => {
     toolbarReady = true
@@ -505,9 +525,9 @@ function registerIpc(): void {
     const height = Math.max(48, Math.min(120, Math.ceil(size.height)))
     toolbarWindow.setSize(width, height, false)
   })
-  ipcMain.on('settings:open', () => {
+  ipcMain.on('settings:open', (_event, section?: SettingsSection) => {
     toolbarWindow?.hide()
-    showMainWindow()
+    showMainWindow(isSettingsSection(section) ? section : undefined)
   })
   ipcMain.on('window:close', (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -536,7 +556,7 @@ function registerIpc(): void {
         event.sender.send('ai:stream', {
           requestId: request.requestId,
           type: 'error',
-          content: error instanceof Error ? error.message : '请求失败'
+          error: classifyAIError(error)
         })
       })
       .finally(() => requests.delete(key))
@@ -560,7 +580,7 @@ function abortRequestsFor(webContentsId: number): void {
 const hasLock = app.requestSingleInstanceLock()
 if (!hasLock) app.quit()
 
-app.on('second-instance', showMainWindow)
+app.on('second-instance', () => showMainWindow())
 
 app.whenReady().then(() => {
   settingsStore = new SettingsStore()
@@ -593,3 +613,7 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => {
   // The tray owns the application lifetime.
 })
+
+function isSettingsSection(value: unknown): value is SettingsSection {
+  return value === 'general' || value === 'model' || value === 'actions' || value === 'about'
+}
