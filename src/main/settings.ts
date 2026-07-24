@@ -1,18 +1,12 @@
 import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { defaultActions, mergeDefaultActions } from '../shared/actions'
 import type { AppSettings, SelectionAction } from '../shared/types'
 
 interface PersistedSettings extends Omit<AppSettings, 'apiKey'> {
   encryptedApiKey: string
 }
-
-export const defaultActions: SelectionAction[] = [
-  { id: 'translate', label: '翻译', kind: 'translate', enabled: true },
-  { id: 'explain', label: '解释', kind: 'explain', enabled: true },
-  { id: 'summarize', label: '总结', kind: 'summarize', enabled: true },
-  { id: 'rewrite', label: '润色', kind: 'rewrite', enabled: true }
-]
 
 const defaults: AppSettings = {
   enabled: true,
@@ -22,6 +16,8 @@ const defaults: AppSettings = {
   apiKey: '',
   model: 'gpt-4.1-mini',
   targetLanguage: '简体中文',
+  autoDictionary: true,
+  jsonExtractionSchema: '',
   actions: defaultActions
 }
 
@@ -37,6 +33,9 @@ export class SettingsStore {
     this.settings = {
       ...this.settings,
       ...patch,
+      jsonExtractionSchema: patch.jsonExtractionSchema === undefined
+        ? this.settings.jsonExtractionSchema
+        : String(patch.jsonExtractionSchema).slice(0, 2000),
       actions: patch.actions ? this.sanitizeActions(patch.actions) : this.settings.actions
     }
     this.write()
@@ -52,6 +51,9 @@ export class SettingsStore {
         ...defaults,
         ...persisted,
         apiKey: this.decrypt(persisted.encryptedApiKey ?? ''),
+        jsonExtractionSchema: typeof persisted.jsonExtractionSchema === 'string'
+          ? persisted.jsonExtractionSchema.slice(0, 2000)
+          : '',
         actions: this.sanitizeActions(persisted.actions ?? defaultActions)
       }
     } catch {
@@ -85,14 +87,27 @@ export class SettingsStore {
   }
 
   private sanitizeActions(actions: SelectionAction[]): SelectionAction[] {
-    return actions
+    const sanitized: SelectionAction[] = actions
       .filter((action) => action.id && action.label && action.kind)
       .map((action) => ({
         id: String(action.id),
         label: String(action.label).slice(0, 20),
         kind: action.kind,
         enabled: Boolean(action.enabled),
-        ...(action.prompt ? { prompt: String(action.prompt).slice(0, 2000) } : {})
+        ...(action.prompt ? { prompt: String(action.prompt).slice(0, 2000) } : {}),
+        ...(action.variants
+          ? {
+              variants: action.variants
+                .filter((variant) => variant.id && variant.label && variant.prompt)
+                .map((variant) => ({
+                  id: String(variant.id),
+                  label: String(variant.label).slice(0, 24),
+                  prompt: String(variant.prompt).slice(0, 2000),
+                  enabled: Boolean(variant.enabled)
+                }))
+            }
+          : {})
       }))
+    return mergeDefaultActions(sanitized)
   }
 }

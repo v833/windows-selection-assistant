@@ -1,4 +1,17 @@
-import { CircleHelp, Clipboard, Languages, Settings, Sparkles, TextQuote, WandSparkles } from 'lucide-react'
+import {
+  BrainCircuit,
+  CircleHelp,
+  Clipboard,
+  Code2,
+  Languages,
+  ListFilter,
+  MessageCircle,
+  PenLine,
+  Settings,
+  Sparkles,
+  TextQuote,
+  WandSparkles
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { SelectionAction, SelectionPayload } from '../../../shared/types'
 
@@ -37,7 +50,7 @@ export function ToolbarApp() {
           className="toolbar-button"
           onClick={() => window.selectionAPI.selectAction(action.id)}
           aria-label={action.label}
-          data-tooltip={action.label}>
+          title={action.label}>
           {toolbarIcon(action.kind)}
         </button>
       ))}
@@ -46,10 +59,10 @@ export function ToolbarApp() {
         className="toolbar-button"
         onClick={() => void window.selectionAPI.copyText(payload.text).then(() => window.selectionAPI.closeWindow())}
         aria-label="复制"
-        data-tooltip="复制">
+        title="复制">
         <Clipboard size={17} />
       </button>
-      <button className="toolbar-button" onClick={() => window.selectionAPI.openSettings()} aria-label="设置" data-tooltip="设置">
+      <button className="toolbar-button" onClick={() => window.selectionAPI.openSettings()} aria-label="设置" title="设置">
         <Settings size={17} />
       </button>
     </div>
@@ -57,9 +70,14 @@ export function ToolbarApp() {
 }
 
 function toolbarIcon(kind: SelectionAction['kind']) {
+  if (kind === 'chat') return <MessageCircle size={17} />
   if (kind === 'translate') return <Languages size={17} />
   if (kind === 'explain') return <CircleHelp size={17} />
   if (kind === 'summarize') return <TextQuote size={17} />
   if (kind === 'rewrite') return <Sparkles size={17} />
+  if (kind === 'writing') return <PenLine size={17} />
+  if (kind === 'extract') return <ListFilter size={17} />
+  if (kind === 'analysis') return <BrainCircuit size={17} />
+  if (kind === 'code') return <Code2 size={17} />
   return <WandSparkles size={17} />
 }

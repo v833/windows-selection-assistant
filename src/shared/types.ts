@@ -1,6 +1,18 @@
 export type ThemeMode = 'system' | 'light' | 'dark'
 
-export type ActionKind = 'translate' | 'explain' | 'summarize' | 'rewrite' | 'custom'
+export type ActionKind = 'chat' | 'translate' | 'explain' | 'summarize' | 'rewrite' | 'writing' | 'extract' | 'analysis' | 'code' | 'custom'
+
+export interface ActionVariant {
+  id: string
+  label: string
+  enabled: boolean
+  prompt: string
+}
+
+export interface AIConversationMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
 
 export interface SelectionAction {
   id: string
@@ -8,6 +20,7 @@ export interface SelectionAction {
   kind: ActionKind
   enabled: boolean
   prompt?: string
+  variants?: ActionVariant[]
 }
 
 export interface AppSettings {
@@ -18,6 +31,8 @@ export interface AppSettings {
   apiKey: string
   model: string
   targetLanguage: string
+  autoDictionary: boolean
+  jsonExtractionSchema: string
   actions: SelectionAction[]
 }
 
@@ -46,6 +61,7 @@ export interface AIRunRequest {
   requestId: string
   action: SelectionAction
   selectedText: string
+  conversation: AIConversationMessage[]
 }
 
 export interface AIStreamEvent {
@@ -73,7 +89,7 @@ export interface SelectionAssistantAPI {
   onAIStream: (listener: (event: AIStreamEvent) => void) => () => void
   toolbarReady: () => void
   resultReady: () => void
-  selectAction: (actionId: string) => void
+  selectAction: (actionId: string, variantId?: string) => void
   resizeToolbar: (width: number, height: number) => void
   runAI: (request: AIRunRequest) => void
   cancelAI: (requestId: string) => void
