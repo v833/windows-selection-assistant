@@ -4,8 +4,10 @@ import type {
   AIStreamEvent,
   AppSettings,
   AssistantStatus,
+  ConversationSession,
   SelectionAssistantAPI,
   SelectionPayload,
+  SessionExportFormat,
   SettingsSection
 } from '../shared/types'
 
@@ -27,6 +29,14 @@ const api: SelectionAssistantAPI = {
   onActionPayload: (listener: (payload: ActionPayload) => void) => subscribe('action:payload', listener),
   onAIStream: (listener: (event: AIStreamEvent) => void) => subscribe('ai:stream', listener),
   onSettingsNavigate: (listener: (section: SettingsSection) => void) => subscribe('settings:navigate', listener),
+  listSessions: () => ipcRenderer.invoke('sessions:list'),
+  saveSession: (session: ConversationSession) => ipcRenderer.invoke('sessions:save', session),
+  renameSession: (sessionId: string, title: string) => ipcRenderer.invoke('sessions:rename', sessionId, title),
+  deleteSession: (sessionId: string) => ipcRenderer.invoke('sessions:delete', sessionId),
+  deleteAllSessions: () => ipcRenderer.invoke('sessions:delete-all'),
+  openSession: (sessionId: string) => ipcRenderer.send('sessions:open', sessionId),
+  exportSession: (sessionId: string, format: SessionExportFormat) => ipcRenderer.invoke('sessions:export', sessionId, format),
+  getSessionStorageInfo: () => ipcRenderer.invoke('sessions:storage-info'),
   toolbarReady: () => ipcRenderer.send('toolbar:ready'),
   resultReady: () => ipcRenderer.send('result:ready'),
   selectAction: (actionId: string, variantId?: string) => ipcRenderer.send('selection:action', actionId, variantId),

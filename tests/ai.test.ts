@@ -21,6 +21,8 @@ const streamSettings = {
   autoDictionary: false,
   jsonExtractionSchema: '',
   maxInputCharacters: 30_000,
+  historyEnabled: false,
+  historyRetentionLimit: 50,
   showRecentActions: true,
   recentActionIds: [],
   resultWindowBounds: null,

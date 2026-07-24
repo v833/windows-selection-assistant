@@ -2,6 +2,7 @@ import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { defaultActions, mergeDefaultActions } from '../shared/actions'
+import { DEFAULT_SESSION_RETENTION_LIMIT, normalizeSessionRetentionLimit } from '../shared/sessions'
 import { DEFAULT_MAX_INPUT_CHARACTERS, normalizeMaxInputCharacters } from '../shared/textLimits'
 import { limitPinnedActions, normalizeShortcut, sanitizeRecentActionIds } from '../shared/toolbar'
 import type { AppSettings, SelectionAction, WindowBounds } from '../shared/types'
@@ -22,6 +23,8 @@ const defaults: AppSettings = {
   autoDictionary: true,
   jsonExtractionSchema: '',
   maxInputCharacters: DEFAULT_MAX_INPUT_CHARACTERS,
+  historyEnabled: false,
+  historyRetentionLimit: DEFAULT_SESSION_RETENTION_LIMIT,
   showRecentActions: true,
   recentActionIds: [],
   resultWindowBounds: null,
@@ -47,12 +50,19 @@ export class SettingsStore {
     const maxInputCharacters = normalizeMaxInputCharacters(
       patch.maxInputCharacters ?? this.settings.maxInputCharacters
     )
+    const historyRetentionLimit = normalizeSessionRetentionLimit(
+      patch.historyRetentionLimit ?? this.settings.historyRetentionLimit
+    )
     const nextSettings: AppSettings = {
       ...this.settings,
       ...patch,
       showRecentActions,
       recentActionIds,
       maxInputCharacters,
+      historyEnabled: patch.historyEnabled === undefined
+        ? this.settings.historyEnabled
+        : Boolean(patch.historyEnabled),
+      historyRetentionLimit,
       resultWindowBounds: patch.resultWindowBounds === undefined
         ? this.settings.resultWindowBounds
         : this.sanitizeWindowBounds(patch.resultWindowBounds),
@@ -81,6 +91,8 @@ export class SettingsStore {
           ? persisted.jsonExtractionSchema.slice(0, 2000)
           : '',
         maxInputCharacters: normalizeMaxInputCharacters(persisted.maxInputCharacters),
+        historyEnabled: Boolean(persisted.historyEnabled),
+        historyRetentionLimit: normalizeSessionRetentionLimit(persisted.historyRetentionLimit),
         showRecentActions,
         recentActionIds: showRecentActions ? sanitizeRecentActionIds(persisted.recentActionIds, actions) : [],
         resultWindowBounds: this.sanitizeWindowBounds(persisted.resultWindowBounds),

@@ -4,9 +4,11 @@ import {
   ChevronUp,
   CircleAlert,
   Copy,
+  Eraser,
   Languages,
   LoaderCircle,
   MessageCircle,
+  MessageSquarePlus,
   Minus,
   RefreshCw,
   Scissors,
@@ -17,6 +19,7 @@ import {
   X
 } from 'lucide-react'
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -25,6 +28,11 @@ import {
   useState,
   type KeyboardEvent
 } from 'react'
+import {
+  createSessionTitle,
+  getActiveContextMessages,
+  resolveInitialContextMode
+} from '../../../shared/sessions'
 import {
   estimateTokenCount,
   trimConversationForRequest,
@@ -36,6 +44,7 @@ import type {
   AIConversationMessage,
   AIErrorInfo,
   AIStreamEvent,
+  ConversationSession,
   SelectionAction
 } from '../../../shared/types'
 import { MarkdownContent } from '../components/MarkdownContent'
@@ -50,6 +59,7 @@ interface ActiveRequest {
   selectedText: string
   action: SelectionAction
   phase: RequestPhase
+  resumeAfterSummary: boolean
 }
 
 const COMPOSER_MAX_HEIGHT = 132
@@ -73,18 +83,47 @@ export function ResultApp() {
   const [copied, setCopied] = useState(false)
   const [sourceStrategy, setSourceStrategy] = useState<SourceStrategy>(null)
   const [sourceSummary, setSourceSummary] = useState('')
+  const [storedContextText, setStoredContextText] = useState('')
   const [sourceExpanded, setSourceExpanded] = useState(false)
+  const [contextStartIndex, setContextStartIndex] = useState(0)
+  const [sessionId, setSessionId] = useState('')
+  const [sessionTitle, setSessionTitle] = useState('')
+  const [sessionCreatedAt, setSessionCreatedAt] = useState('')
+  const [sessionPersisted, setSessionPersisted] = useState(false)
+  const [sessionSaveError, setSessionSaveError] = useState('')
+  const [historyActive, setHistoryActive] = useState(false)
   const contentRef = useRef<HTMLElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const requestId = useRef('')
   const streamingRef = useRef('')
   const streamFrameRef = useRef<number | null>(null)
   const activeRequestRef = useRef<ActiveRequest | null>(null)
+  const skipPersistRef = useRef(false)
+  const persistRevisionRef = useRef(0)
+  const latestSessionRef = useRef<ConversationSession | null>(null)
+
+  const persistSession = useCallback((session: ConversationSession) => {
+    latestSessionRef.current = session
+    const revision = ++persistRevisionRef.current
+    setSessionPersisted(false)
+    setSessionSaveError('')
+    void window.selectionAPI.saveSession(session).then((saved) => {
+      if (revision !== persistRevisionRef.current) return
+      setSessionPersisted(Boolean(saved))
+      setHistoryActive(Boolean(saved))
+      if (saved) setSessionTitle(saved.title)
+    }).catch((saveError) => {
+      if (revision !== persistRevisionRef.current) return
+      setSessionPersisted(false)
+      setHistoryActive(true)
+      setSessionSaveError(readableSessionError(saveError))
+    })
+  }, [])
 
   const run = useCallback((
     nextPayload: ActionPayload,
     conversation: AIConversationMessage[],
-    options: Partial<Pick<ActiveRequest, 'selectedText' | 'action' | 'phase'>> = {}
+    options: Partial<Pick<ActiveRequest, 'selectedText' | 'action' | 'phase' | 'resumeAfterSummary'>> = {}
   ) => {
     if (requestId.current) window.selectionAPI.cancelAI(requestId.current)
     const id = crypto.randomUUID()
@@ -93,7 +132,8 @@ export function ResultApp() {
       conversation,
       selectedText: options.selectedText ?? nextPayload.selectedText,
       action: options.action ?? nextPayload.action,
-      phase: options.phase ?? 'answer'
+      phase: options.phase ?? 'answer',
+      resumeAfterSummary: options.resumeAfterSummary ?? false
     }
     activeRequestRef.current = activeRequest
     requestId.current = id
@@ -121,19 +161,37 @@ export function ResultApp() {
       requestId.current = ''
       streamingRef.current = ''
       activeRequestRef.current = null
+      persistRevisionRef.current += 1
+      skipPersistRef.current = true
+      const reopenedSession = next.session
+      const now = new Date().toISOString()
       setPayload(next)
-      setMessages([])
+      setMessages(reopenedSession?.messages ?? [])
       setStreaming('')
       setDraft('')
       setError(null)
-      setNotice('')
+      setNotice(reopenedSession ? '已打开历史会话。' : '')
       setCopied(false)
-      setSourceStrategy(sourceExceedsLimit ? null : 'full')
-      setSourceSummary('')
+      setSourceStrategy(resolveInitialContextMode(
+        reopenedSession?.contextMode,
+        next.selectedText.length,
+        next.maxInputCharacters
+      ))
+      setSourceSummary(reopenedSession?.contextMode === 'summarize' ? reopenedSession.contextText : '')
+      setStoredContextText(reopenedSession?.contextText ?? '')
       setSourceExpanded(false)
+      setContextStartIndex(reopenedSession?.contextStartIndex ?? 0)
+      setSessionId(reopenedSession?.id ?? crypto.randomUUID())
+      setSessionTitle(reopenedSession?.title ?? createSessionTitle(next.selectedText, next.action.label))
+      setSessionCreatedAt(reopenedSession?.createdAt ?? now)
+      setSessionPersisted(Boolean(reopenedSession))
+      setSessionSaveError('')
+      setHistoryActive(next.historyEnabled)
+      latestSessionRef.current = reopenedSession ?? null
       document.documentElement.dataset.theme = next.theme
 
-      if (next.action.kind === 'chat' || sourceExceedsLimit) setState('idle')
+      if (reopenedSession) setState(reopenedSession.messages.length ? 'done' : 'idle')
+      else if (next.action.kind === 'chat' || sourceExceedsLimit) setState('idle')
       else run(next, [])
     })
     const unsubscribeStream = window.selectionAPI.onAIStream((event: AIStreamEvent) => {
@@ -163,10 +221,11 @@ export function ResultApp() {
             return
           }
           setSourceSummary(answer)
+          setStoredContextText(answer)
           setSourceStrategy('summarize')
-          if (activeRequest.payload.action.kind === 'chat') {
+          if (activeRequest.payload.action.kind === 'chat' || activeRequest.resumeAfterSummary) {
             setNotice('长文本已压缩，可继续提问。')
-            setState('idle')
+            setState(activeRequest.resumeAfterSummary ? 'done' : 'idle')
           } else {
             run(activeRequest.payload, [], { selectedText: answer })
           }
@@ -218,16 +277,21 @@ export function ResultApp() {
 
   const effectiveSelectedText = useMemo(() => {
     if (!payload) return ''
-    if (sourceStrategy === 'truncate') return truncateText(payload.selectedText, payload.maxInputCharacters).text
+    if (sourceStrategy === 'truncate') return storedContextText || truncateText(payload.selectedText, payload.maxInputCharacters).text
     if (sourceStrategy === 'summarize') return sourceSummary
     if (sourceStrategy === 'full') return payload.selectedText
     return ''
-  }, [payload, sourceStrategy, sourceSummary])
+  }, [payload, sourceStrategy, sourceSummary, storedContextText])
+
+  const activeContextMessages = useMemo(
+    () => getActiveContextMessages(messages, contextStartIndex),
+    [contextStartIndex, messages]
+  )
 
   const nextConversation = useMemo<AIConversationMessage[]>(() => {
     const question = draft.trim()
-    return question ? [...messages, { role: 'user', content: question }] : messages
-  }, [draft, messages])
+    return question ? [...activeContextMessages, { role: 'user', content: question }] : activeContextMessages
+  }, [activeContextMessages, draft])
   const historyUsage = useMemo(() => trimConversationForRequest(nextConversation), [nextConversation])
   const sourceTokenCount = useMemo(() => estimateTokenCount(payload?.selectedText ?? ''), [payload?.selectedText])
   const effectiveSourceTokenCount = useMemo(() => estimateTokenCount(effectiveSelectedText), [effectiveSelectedText])
@@ -240,31 +304,66 @@ export function ResultApp() {
   const sourceExceedsLimit = Boolean(payload && payload.selectedText.length > payload.maxInputCharacters)
   const activePhase = activeRequestRef.current?.phase ?? 'answer'
 
+  const createSessionSnapshot = useCallback((nextMessages: AIConversationMessage[]): ConversationSession | null => {
+    if (!payload || !sessionId || !nextMessages.length || !effectiveSelectedText || !sourceStrategy) return null
+    const now = new Date().toISOString()
+    return {
+      id: sessionId,
+      title: sessionTitle,
+      selectedText: payload.selectedText,
+      contextText: effectiveSelectedText,
+      contextMode: sourceStrategy,
+      contextStartIndex,
+      programName: payload.programName,
+      action: payload.action,
+      model: payload.model,
+      createdAt: sessionCreatedAt || now,
+      updatedAt: now,
+      messages: nextMessages
+    }
+  }, [contextStartIndex, effectiveSelectedText, payload, sessionCreatedAt, sessionId, sessionTitle, sourceStrategy])
+
+  useEffect(() => {
+    if (skipPersistRef.current) {
+      skipPersistRef.current = false
+      return
+    }
+    if (state === 'loading') return
+    const session = createSessionSnapshot(messages)
+    if (session) persistSession(session)
+  }, [createSessionSnapshot, messages, persistSession, state])
+
   function chooseTruncate() {
     if (!payload) return
     const truncated = truncateText(payload.selectedText, payload.maxInputCharacters)
     setSourceStrategy('truncate')
     setSourceSummary('')
+    setStoredContextText(truncated.text)
     setNotice(`已截断 ${truncated.omittedCharacters.toLocaleString()} 个字符。`)
-    if (payload.action.kind !== 'chat') run(payload, [], { selectedText: truncated.text })
+    if (payload.action.kind !== 'chat' && messages.length === 0) run(payload, [], { selectedText: truncated.text })
   }
 
   function chooseSummarize() {
     if (!payload) return
     setSourceStrategy('summarize')
     setSourceSummary('')
+    setStoredContextText('')
     run(payload, [], {
       selectedText: payload.selectedText,
       action: LONG_SOURCE_SUMMARY_ACTION,
-      phase: 'source-summary'
+      phase: 'source-summary',
+      resumeAfterSummary: messages.length > 0
     })
   }
 
   function sendQuestion() {
     const question = draft.trim()
     if (!payload || !effectiveSelectedText || !question || state === 'loading') return
-    const conversation: AIConversationMessage[] = [...messages, { role: 'user', content: question }]
-    setMessages(conversation)
+    const displayMessages: AIConversationMessage[] = [...messages, { role: 'user', content: question }]
+    const conversation: AIConversationMessage[] = [...activeContextMessages, { role: 'user', content: question }]
+    const session = createSessionSnapshot(displayMessages)
+    if (session) persistSession(session)
+    setMessages(displayMessages)
     setDraft('')
     run(payload, conversation, { selectedText: effectiveSelectedText })
   }
@@ -295,6 +394,7 @@ export function ResultApp() {
     if (activeRequest?.phase === 'source-summary') {
       setSourceStrategy(null)
       setSourceSummary('')
+      setStoredContextText('')
       setNotice('已停止长文本总结。')
       setState('idle')
       return
@@ -307,10 +407,44 @@ export function ResultApp() {
 
   function regenerate() {
     if (!payload || !effectiveSelectedText || state === 'loading') return
-    const conversation = messages.at(-1)?.role === 'assistant' ? messages.slice(0, -1) : messages
+    const latestIndex = messages.length - 1
+    const shouldRemoveLatest = messages.at(-1)?.role === 'assistant' && latestIndex >= contextStartIndex
+    const displayMessages = shouldRemoveLatest ? messages.slice(0, -1) : messages
+    const conversation = getActiveContextMessages(displayMessages, contextStartIndex)
     if (payload.action.kind === 'chat' && conversation.length === 0) return
-    setMessages(conversation)
+    setMessages(displayMessages)
     run(payload, conversation, { selectedText: effectiveSelectedText })
+  }
+
+  function clearContext() {
+    if (!messages.length || contextStartIndex === messages.length || state === 'loading') return
+    setContextStartIndex(messages.length)
+    setDraft('')
+    setError(null)
+    setNotice('上下文已清空，之前的消息仍保留在当前会话中。')
+  }
+
+  function startNewConversation() {
+    if (!payload || state === 'loading') return
+    if (messages.length > 0 && !sessionPersisted && !window.confirm('当前会话尚未保存，确定开始新会话并放弃这些内容吗？')) return
+    const now = new Date().toISOString()
+    setMessages([])
+    setStreaming('')
+    streamingRef.current = ''
+    setDraft('')
+    setError(null)
+    setNotice('已开始新会话。')
+    setContextStartIndex(0)
+    setSessionId(crypto.randomUUID())
+    setSessionTitle(createSessionTitle(payload.selectedText, payload.action.label))
+    setSessionCreatedAt(now)
+    setSessionPersisted(false)
+    setSessionSaveError('')
+    persistRevisionRef.current += 1
+    latestSessionRef.current = null
+    skipPersistRef.current = true
+    if (payload.action.kind === 'chat' || !effectiveSelectedText) setState('idle')
+    else run(payload, [], { selectedText: effectiveSelectedText })
   }
 
   function retryLastRequest() {
@@ -320,8 +454,14 @@ export function ResultApp() {
     run(activeRequest.payload, activeRequest.conversation, {
       selectedText: activeRequest.selectedText,
       action: activeRequest.action,
-      phase: activeRequest.phase
+      phase: activeRequest.phase,
+      resumeAfterSummary: activeRequest.resumeAfterSummary
     })
+  }
+
+  function retrySessionSave() {
+    const session = createSessionSnapshot(messages) ?? latestSessionRef.current
+    if (session) persistSession(session)
   }
 
   async function copy() {
@@ -336,7 +476,7 @@ export function ResultApp() {
   const composerDisabled = !payload || !effectiveSelectedText || state === 'loading'
   const canRegenerate = Boolean(
     payload && effectiveSelectedText && state !== 'loading' &&
-    (payload.action.kind !== 'chat' || messages.length > 0)
+    (payload.action.kind !== 'chat' || activeContextMessages.length > 0)
   )
 
   return (
@@ -369,7 +509,7 @@ export function ResultApp() {
           )}
         </div>
         <p className={sourceExpanded ? 'expanded' : ''}>{payload?.selectedText}</p>
-        {sourceStrategy === 'truncate' && <em>当前请求使用截断后的前 {payload?.maxInputCharacters.toLocaleString()} 个字符</em>}
+        {sourceStrategy === 'truncate' && <em>当前请求使用截断后的 {effectiveSelectedText.length.toLocaleString()} 字符内容</em>}
         {sourceSummary && <em>当前请求使用模型压缩后的 {sourceSummary.length.toLocaleString()} 字符摘要</em>}
       </section>
 
@@ -393,13 +533,17 @@ export function ResultApp() {
             <div className="conversation-empty"><MessageCircle size={20} /><span>等待提问</span></div>
           )}
           {messages.map((message, index) => (
-            <article className={`conversation-message ${message.role}`} key={`${message.role}-${index}`}>
-              <span className="message-role">{message.role === 'user' ? '你' : '助手'}</span>
-              <div className="message-text">
-                {message.role === 'assistant' ? <MarkdownContent content={message.content} /> : message.content}
-              </div>
-            </article>
+            <Fragment key={`${message.role}-${index}`}>
+              {index === contextStartIndex && contextStartIndex > 0 && <div className="context-divider">新上下文从这里开始</div>}
+              <article className={`conversation-message ${message.role}`}>
+                <span className="message-role">{message.role === 'user' ? '你' : '助手'}</span>
+                <div className="message-text">
+                  {message.role === 'assistant' ? <MarkdownContent content={message.content} /> : message.content}
+                </div>
+              </article>
+            </Fragment>
           ))}
+          {messages.length > 0 && contextStartIndex === messages.length && <div className="context-divider">上下文已清空，下一条消息将开始新上下文</div>}
           {state === 'loading' && activePhase === 'source-summary' && (
             <div className="result-loading"><LoaderCircle className="spin" size={20} /><span>正在压缩长文本{streaming ? ` · 已生成 ${streaming.length.toLocaleString()} 字符` : ''}</span></div>
           )}
@@ -444,7 +588,7 @@ export function ResultApp() {
           />
           <div className="composer-meta">
             <span>{draft.length.toLocaleString()} 字符 · 约 {draftTokenCount.toLocaleString()} tokens</span>
-            <span>本次上下文 {requestCharacters.toLocaleString()} 字符 · 约 {requestTokens.toLocaleString()} tokens</span>
+            <span>本次上下文 {historyUsage.messages.length} 条消息 · {requestCharacters.toLocaleString()} 字符 · 约 {requestTokens.toLocaleString()} tokens</span>
             {historyUsage.omittedMessages > 0 && <strong>将省略较早的 {historyUsage.omittedMessages} 条消息</strong>}
           </div>
         </div>
@@ -456,8 +600,17 @@ export function ResultApp() {
       </form>
 
       <footer className="result-footer">
-        <span>{payload?.model ?? ''}</span>
-        <div>
+        <div className="result-session-meta">
+          <span>{payload?.model ?? ''}</span>
+          {historyActive && sessionSaveError ? (
+            <button className="session-save-retry" type="button" onClick={retrySessionSave} title={sessionSaveError}>保存失败，点击重试</button>
+          ) : (
+            <em>{historyActive ? sessionPersisted ? '历史已保存' : '正在保存' : '历史关闭'}</em>
+          )}
+        </div>
+        <div className="result-footer-actions">
+          <button className="session-command" type="button" onClick={startNewConversation} disabled={!payload || state === 'loading'}><MessageSquarePlus size={14} />新会话</button>
+          <button className="session-command" type="button" onClick={clearContext} disabled={!messages.length || contextStartIndex === messages.length || state === 'loading'}><Eraser size={14} />清上下文</button>
           <button className="result-action" onClick={regenerate} disabled={!canRegenerate} aria-label="重新生成" data-tooltip="重新生成"><RefreshCw size={16} /></button>
           <button className="result-action" onClick={() => void copy()} disabled={!latestAnswer} aria-label="复制最近回答" data-tooltip="复制最近回答">{copied ? <Check size={16} /> : <Copy size={16} />}</button>
         </div>
@@ -481,4 +634,9 @@ function fallbackError(message: string): AIErrorInfo {
     canRetry: true,
     openSettings: false
   }
+}
+
+function readableSessionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : '会话保存失败'
+  return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }

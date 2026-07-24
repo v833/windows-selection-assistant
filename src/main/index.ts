@@ -2,20 +2,24 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  dialog,
   globalShortcut,
   ipcMain,
   Menu,
   nativeImage,
+  safeStorage,
   screen,
   shell,
   Tray,
   type MenuItemConstructorOptions
 } from 'electron'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TextSelectionData } from 'selection-hook'
 import { getEnabledActionVariants, resolveActionVariant } from '../shared/actions'
 import { classifyAIError } from '../shared/aiErrors'
 import { sanitizeExternalUrl } from '../shared/markdown'
+import { serializeSession } from '../shared/sessions'
 import {
   normalizeShortcut,
   recordRecentAction,
@@ -28,14 +32,17 @@ import type {
   AIRunRequest,
   AppSettings,
   AssistantStatus,
+  ConversationSession,
   SelectionAction,
   SelectionPayload,
+  SessionExportFormat,
   SettingsSection,
   WindowBounds
 } from '../shared/types'
 import { fitWindowBoundsToArea } from '../shared/windowBounds'
 import { streamCompletion, testConnection } from './ai'
 import { SelectionService } from './selection'
+import { SessionStore } from './sessionStore'
 import { SettingsStore } from './settings'
 
 let mainWindow: BrowserWindow | null = null
@@ -43,6 +50,7 @@ let toolbarWindow: BrowserWindow | null = null
 let resultWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let settingsStore: SettingsStore
+let sessionStore: SessionStore
 let selectionService: SelectionService
 let lastSelection: TextSelectionData | null = null
 let pendingAction: ActionPayload | null = null
@@ -243,9 +251,33 @@ function showAction(actionId: string, variantId?: string): void {
     programName: lastSelection.programName,
     model: settings.model,
     maxInputCharacters: settings.maxInputCharacters,
+    historyEnabled: settings.historyEnabled,
     theme: settings.theme
   }
   toolbarWindow?.hide()
+  resultWindow ??= createResultWindow()
+  if (resultWindow.isMinimized()) resultWindow.restore()
+  if (resultWindowHasCustomBounds) restoreResultWindowBounds(resultWindow)
+  else positionResultWindow(resultWindow)
+  resultWindow.show()
+  resultWindow.focus()
+  if (resultReady) resultWindow.webContents.send('action:payload', pendingAction)
+}
+
+function showSession(sessionId: string): void {
+  const session = sessionStore.get(sessionId)
+  if (!session) return
+  const settings = settingsStore.get()
+  pendingAction = {
+    action: session.action,
+    selectedText: session.selectedText,
+    programName: session.programName,
+    model: settings.model,
+    maxInputCharacters: settings.maxInputCharacters,
+    historyEnabled: settings.historyEnabled,
+    theme: settings.theme,
+    session
+  }
   resultWindow ??= createResultWindow()
   if (resultWindow.isMinimized()) resultWindow.restore()
   if (resultWindowHasCustomBounds) restoreResultWindowBounds(resultWindow)
@@ -488,6 +520,9 @@ function registerIpc(): void {
     if (settings.launchAtLogin !== before.launchAtLogin) {
       app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
     }
+    if (settings.historyRetentionLimit !== before.historyRetentionLimit) {
+      sessionStore.enforceRetention(settings.historyRetentionLimit)
+    }
     sendSelection()
     rebuildTrayMenu()
     return settings
@@ -507,6 +542,32 @@ function registerIpc(): void {
     if (!url) return false
     await shell.openExternal(url)
     return true
+  })
+  ipcMain.handle('sessions:list', () => sessionStore.list())
+  ipcMain.handle('sessions:save', (_event, session: ConversationSession) => {
+    const settings = settingsStore.get()
+    return sessionStore.save(session, settings.historyEnabled, settings.historyRetentionLimit)
+  })
+  ipcMain.handle('sessions:rename', (_event, sessionId: string, title: string) => sessionStore.rename(sessionId, title))
+  ipcMain.handle('sessions:delete', (_event, sessionId: string) => sessionStore.delete(sessionId))
+  ipcMain.handle('sessions:delete-all', () => sessionStore.deleteAll())
+  ipcMain.handle('sessions:storage-info', () => sessionStore.storageInfo())
+  ipcMain.handle('sessions:export', async (_event, sessionId: string, format: SessionExportFormat) => {
+    const session = sessionStore.get(sessionId)
+    if (!session || (format !== 'markdown' && format !== 'json')) return null
+    const extension = format === 'markdown' ? 'md' : 'json'
+    const safeTitle = session.title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_') || '会话导出'
+    const options = {
+      title: '导出会话',
+      defaultPath: join(app.getPath('documents'), `${safeTitle}.${extension}`),
+      filters: [{ name: format === 'markdown' ? 'Markdown' : 'JSON', extensions: [extension] }]
+    }
+    const result = mainWindow
+      ? await dialog.showSaveDialog(mainWindow, options)
+      : await dialog.showSaveDialog(options)
+    if (result.canceled || !result.filePath) return null
+    await writeFile(result.filePath, serializeSession(session, format), 'utf8')
+    return result.filePath
   })
 
   ipcMain.on('toolbar:ready', () => {
@@ -529,6 +590,7 @@ function registerIpc(): void {
     toolbarWindow?.hide()
     showMainWindow(isSettingsSection(section) ? section : undefined)
   })
+  ipcMain.on('sessions:open', (_event, sessionId: string) => showSession(sessionId))
   ipcMain.on('window:close', (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
     if (!window) return
@@ -584,6 +646,16 @@ app.on('second-instance', () => showMainWindow())
 
 app.whenReady().then(() => {
   settingsStore = new SettingsStore()
+  sessionStore = new SessionStore(join(app.getPath('userData'), 'sessions.json'), {
+    encrypt: (value) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 安全存储不可用，无法保存会话历史')
+      return safeStorage.encryptString(value).toString('base64')
+    },
+    decrypt: (value) => {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 安全存储不可用，无法读取会话历史')
+      return safeStorage.decryptString(Buffer.from(value, 'base64'))
+    }
+  })
   toolbarWindow = createToolbarWindow()
   selectionService = new SelectionService(
     () => toolbarWindow,
@@ -615,5 +687,5 @@ app.on('window-all-closed', () => {
 })
 
 function isSettingsSection(value: unknown): value is SettingsSection {
-  return value === 'general' || value === 'model' || value === 'actions' || value === 'about'
+  return value === 'general' || value === 'model' || value === 'actions' || value === 'history' || value === 'about'
 }
