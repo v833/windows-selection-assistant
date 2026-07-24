@@ -1,18 +1,25 @@
 import {
   Activity,
+  ArrowDown,
+  ArrowUp,
+  BrainCircuit,
   Bot,
   Check,
   ChevronRight,
   CircleHelp,
+  Code2,
   Copy,
   Eye,
   EyeOff,
   Info,
   Languages,
   LoaderCircle,
+  ListFilter,
+  MessageCircle,
   MonitorCog,
   Moon,
   Plus,
+  PenLine,
   Save,
   Settings2,
   Sparkles,
@@ -21,10 +28,12 @@ import {
   WandSparkles,
   Zap
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AppInfo, AppSettings, AssistantStatus, SelectionAction, ThemeMode } from '../../../shared/types'
 
 type Section = 'general' | 'model' | 'actions' | 'about'
+type SettingsPatch = Partial<AppSettings> | ((settings: AppSettings) => Partial<AppSettings>)
+type SaveSettings = (patch: SettingsPatch, showConfirmation?: boolean) => Promise<void>
 
 const navigation = [
   { id: 'general' as const, label: '常规', icon: Settings2 },
@@ -39,10 +48,13 @@ export function MainApp() {
   const [status, setStatus] = useState<AssistantStatus>({ enabled: false, running: false })
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
   const [saved, setSaved] = useState(false)
+  const settingsRef = useRef<AppSettings | null>(null)
+  const saveRevision = useRef(0)
 
   useEffect(() => {
     void Promise.all([window.selectionAPI.getSettings(), window.selectionAPI.getStatus(), window.selectionAPI.getAppInfo()]).then(
       ([nextSettings, nextStatus, nextAppInfo]) => {
+        settingsRef.current = nextSettings
         setSettings(nextSettings)
         setStatus(nextStatus)
         setAppInfo(nextAppInfo)
@@ -52,13 +64,32 @@ export function MainApp() {
     return window.selectionAPI.onStatusChanged(setStatus)
   }, [])
 
-  async function save(patch: Partial<AppSettings>, showConfirmation = false) {
-    const next = await window.selectionAPI.saveSettings(patch)
-    setSettings(next)
-    applyTheme(next.theme)
-    if (showConfirmation) {
-      setSaved(true)
-      window.setTimeout(() => setSaved(false), 1600)
+  async function save(patchOrUpdater: SettingsPatch, showConfirmation = false) {
+    const current = settingsRef.current
+    if (!current) return
+
+    const patch = typeof patchOrUpdater === 'function' ? patchOrUpdater(current) : patchOrUpdater
+    const optimistic = { ...current, ...patch }
+    const revision = ++saveRevision.current
+    settingsRef.current = optimistic
+    setSettings(optimistic)
+    applyTheme(optimistic.theme)
+
+    try {
+      const next = await window.selectionAPI.saveSettings(patch)
+      if (revision !== saveRevision.current) return
+      settingsRef.current = next
+      setSettings(next)
+      applyTheme(next.theme)
+      if (showConfirmation) {
+        setSaved(true)
+        window.setTimeout(() => setSaved(false), 1600)
+      }
+    } catch {
+      if (revision !== saveRevision.current) return
+      settingsRef.current = current
+      setSettings(current)
+      applyTheme(current.theme)
     }
   }
 
@@ -120,7 +151,7 @@ function GeneralSettings({
 }: {
   settings: AppSettings
   status: AssistantStatus
-  save: (patch: Partial<AppSettings>) => Promise<void>
+  save: SaveSettings
 }) {
   return (
     <SettingsPage title="常规" subtitle="管理划词监听与应用行为">
@@ -165,7 +196,7 @@ function ModelSettings({
   saved
 }: {
   settings: AppSettings
-  save: (patch: Partial<AppSettings>, showConfirmation?: boolean) => Promise<void>
+  save: SaveSettings
   saved: boolean
 }) {
   const [draft, setDraft] = useState(settings)
@@ -235,16 +266,53 @@ function ModelSettings({
   )
 }
 
-function ActionSettings({ settings, save }: { settings: AppSettings; save: (patch: Partial<AppSettings>) => Promise<void> }) {
+function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveSettings }) {
   const [adding, setAdding] = useState(false)
   const [label, setLabel] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [jsonSchema, setJsonSchema] = useState(settings.jsonExtractionSchema)
+
+  useEffect(() => setJsonSchema(settings.jsonExtractionSchema), [settings.jsonExtractionSchema])
 
   const builtIns = useMemo(() => settings.actions.filter((action) => action.kind !== 'custom'), [settings.actions])
   const custom = useMemo(() => settings.actions.filter((action) => action.kind === 'custom'), [settings.actions])
 
   function updateAction(id: string, patch: Partial<SelectionAction>) {
-    void save({ actions: settings.actions.map((action) => (action.id === id ? { ...action, ...patch } : action)) })
+    void save((current) => ({
+      actions: current.actions.map((action) => (action.id === id ? { ...action, ...patch } : action))
+    }))
+  }
+
+  function updateVariant(actionId: string, variantId: string, enabled: boolean) {
+    void save((current) => ({
+      actions: current.actions.map((action) =>
+        action.id === actionId
+          ? {
+              ...action,
+              variants: action.variants?.map((variant) => (variant.id === variantId ? { ...variant, enabled } : variant))
+            }
+          : action
+      )
+    }))
+  }
+
+  function moveAction(id: string, direction: -1 | 1) {
+    void save((current) => {
+      const sourceIndex = current.actions.findIndex((action) => action.id === id)
+      if (sourceIndex < 0) return {}
+
+      const isCustom = current.actions[sourceIndex].kind === 'custom'
+      let targetIndex = sourceIndex + direction
+      while (targetIndex >= 0 && targetIndex < current.actions.length) {
+        if ((current.actions[targetIndex].kind === 'custom') === isCustom) break
+        targetIndex += direction
+      }
+      if (targetIndex < 0 || targetIndex >= current.actions.length) return {}
+
+      const actions = [...current.actions]
+      ;[actions[sourceIndex], actions[targetIndex]] = [actions[targetIndex], actions[sourceIndex]]
+      return { actions }
+    })
   }
 
   function addAction() {
@@ -256,7 +324,7 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: (patc
       kind: 'custom',
       enabled: true
     }
-    void save({ actions: [...settings.actions, action] })
+    void save((current) => ({ actions: [...current.actions, action] }))
     setLabel('')
     setPrompt('')
     setAdding(false)
@@ -265,10 +333,44 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: (patc
   return (
     <SettingsPage title="快捷动作" subtitle="选择工具条中显示的处理方式">
       <section className="settings-section">
+        <SectionTitle icon={CircleHelp} title="智能路由" />
+        <SettingRow title="短词词典模式" description="执行“解释”时，短词优先返回定义、读音、例句和专业背景">
+          <Switch checked={settings.autoDictionary} onChange={(autoDictionary) => void save({ autoDictionary })} label="启用短词词典模式" />
+        </SettingRow>
+        <div className="json-schema-setting">
+          <label className="field-label">
+            <span>JSON 字段 / Schema</span>
+            <textarea
+              value={jsonSchema}
+              onChange={(event) => setJsonSchema(event.target.value)}
+              placeholder={'例如：{"date":"string","tasks":["string"]}'}
+              maxLength={2000}
+              rows={3}
+            />
+          </label>
+          <div className="form-actions">
+            <button
+              className="secondary-button compact"
+              onClick={() => void save({ jsonExtractionSchema: jsonSchema.trim() })}
+              disabled={jsonSchema.trim() === settings.jsonExtractionSchema}>
+              <Save size={15} />保存结构
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-section">
         <SectionTitle icon={Sparkles} title="内置动作" />
         <div className="action-list">
-          {builtIns.map((action) => (
-            <ActionRow key={action.id} action={action} onToggle={(enabled) => updateAction(action.id, { enabled })} />
+          {builtIns.map((action, index) => (
+            <ActionRow
+              key={action.id}
+              action={action}
+              onToggle={(enabled) => updateAction(action.id, { enabled })}
+              onVariantToggle={(variantId, enabled) => updateVariant(action.id, variantId, enabled)}
+              onMoveUp={index > 0 ? () => moveAction(action.id, -1) : undefined}
+              onMoveDown={index < builtIns.length - 1 ? () => moveAction(action.id, 1) : undefined}
+            />
           ))}
         </div>
       </section>
@@ -287,12 +389,14 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: (patc
         )}
         <div className="action-list">
           {custom.length === 0 && !adding && <div className="empty-row">暂无自定义动作</div>}
-          {custom.map((action) => (
+          {custom.map((action, index) => (
             <ActionRow
               key={action.id}
               action={action}
               onToggle={(enabled) => updateAction(action.id, { enabled })}
-              onDelete={() => void save({ actions: settings.actions.filter((item) => item.id !== action.id) })}
+              onMoveUp={index > 0 ? () => moveAction(action.id, -1) : undefined}
+              onMoveDown={index < custom.length - 1 ? () => moveAction(action.id, 1) : undefined}
+              onDelete={() => void save((current) => ({ actions: current.actions.filter((item) => item.id !== action.id) }))}
             />
           ))}
         </div>
@@ -301,13 +405,51 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: (patc
   )
 }
 
-function ActionRow({ action, onToggle, onDelete }: { action: SelectionAction; onToggle: (enabled: boolean) => void; onDelete?: () => void }) {
+function ActionRow({
+  action,
+  onToggle,
+  onVariantToggle,
+  onMoveUp,
+  onMoveDown,
+  onDelete
+}: {
+  action: SelectionAction
+  onToggle: (enabled: boolean) => void
+  onVariantToggle?: (variantId: string, enabled: boolean) => void
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  onDelete?: () => void
+}) {
   return (
-    <div className="action-row">
-      <div className="action-icon">{actionIcon(action.kind)}</div>
-      <div className="action-copy"><strong>{action.label}</strong><span>{action.prompt ?? actionDescription(action.kind)}</span></div>
-      {onDelete && <button className="icon-button danger" onClick={onDelete} aria-label={`删除${action.label}`}><Trash2 size={16} /></button>}
-      <Switch checked={action.enabled} onChange={onToggle} label={`显示${action.label}`} />
+    <div className="action-group">
+      <div className="action-row">
+        <div className="action-icon">{actionIcon(action.kind)}</div>
+        <div className="action-copy"><strong>{action.label}</strong><span>{action.prompt ?? actionDescription(action.kind)}</span></div>
+        <div className="action-order">
+          <button className="icon-button" onClick={onMoveUp} disabled={!onMoveUp} aria-label={`上移${action.label}`} title="上移">
+            <ArrowUp size={15} />
+          </button>
+          <button className="icon-button" onClick={onMoveDown} disabled={!onMoveDown} aria-label={`下移${action.label}`} title="下移">
+            <ArrowDown size={15} />
+          </button>
+        </div>
+        {onDelete && <button className="icon-button danger" onClick={onDelete} aria-label={`删除${action.label}`}><Trash2 size={16} /></button>}
+        <Switch checked={action.enabled} onChange={onToggle} label={`显示${action.label}`} />
+      </div>
+      {action.variants && action.variants.length > 0 && onVariantToggle && (
+        <div className="action-variant-list" aria-label={`${action.label}的二级选项`}>
+          {action.variants.map((variant) => (
+            <div className="action-variant-row" key={variant.id}>
+              <span>{variant.label}</span>
+              <Switch
+                checked={variant.enabled}
+                onChange={(enabled) => onVariantToggle(variant.id, enabled)}
+                label={`启用${variant.label}`}
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -346,15 +488,32 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (che
 }
 
 function actionIcon(kind: SelectionAction['kind']) {
+  if (kind === 'chat') return <MessageCircle size={17} />
   if (kind === 'translate') return <Languages size={17} />
   if (kind === 'explain') return <CircleHelp size={17} />
   if (kind === 'summarize') return <Copy size={17} />
   if (kind === 'rewrite') return <Sparkles size={17} />
+  if (kind === 'writing') return <PenLine size={17} />
+  if (kind === 'extract') return <ListFilter size={17} />
+  if (kind === 'analysis') return <BrainCircuit size={17} />
+  if (kind === 'code') return <Code2 size={17} />
   return <WandSparkles size={17} />
 }
 
 function actionDescription(kind: SelectionAction['kind']) {
-  return { translate: '翻译为目标语言', explain: '解释含义与背景', summarize: '提炼核心信息', rewrite: '优化表达并保持原意', custom: '' }[kind]
+  const descriptions: Record<SelectionAction['kind'], string> = {
+    chat: '围绕选中文本连续提问',
+    translate: '直接翻译或反向翻译',
+    explain: '解释含义与背景',
+    summarize: '提炼核心信息',
+    rewrite: '优化表达并保持原意',
+    writing: '纠错、精简、扩写、语气、回复和标题生成',
+    extract: '提取日期、人物、地址、待办、关键词或 JSON',
+    analysis: '术语解释与观点分析',
+    code: '解释、诊断、注释或转换代码',
+    custom: ''
+  }
+  return descriptions[kind]
 }
 
 function applyTheme(theme: ThemeMode) {

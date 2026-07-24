@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, Tray
 import { join } from 'node:path'
 import type { TextSelectionData } from 'selection-hook'
 import type { ActionPayload, AIRunRequest, AssistantStatus, SelectionPayload } from '../shared/types'
+import { resolveActionVariant } from '../shared/actions'
 import { streamCompletion, testConnection } from './ai'
 import { SelectionService } from './selection'
 import { SettingsStore } from './settings'
@@ -96,7 +97,7 @@ function createToolbarWindow(): BrowserWindow {
 function createResultWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 560,
-    height: 520,
+    height: 600,
     minWidth: 420,
     minHeight: 360,
     show: false,
@@ -136,7 +137,7 @@ function selectionPayload(): SelectionPayload | null {
   return {
     text: lastSelection.text,
     programName: lastSelection.programName,
-    actions: settings.actions.filter((action) => action.enabled),
+    actions: settings.actions.filter((action) => action.enabled && (!action.variants || action.variants.some((variant) => variant.enabled))),
     theme: settings.theme
   }
 }
@@ -148,14 +149,28 @@ function sendSelection(): void {
   }
 }
 
-function showAction(actionId: string): void {
+function showAction(actionId: string, variantId?: string): void {
   if (!lastSelection) return
   const settings = settingsStore.get()
   const action = settings.actions.find((item) => item.id === actionId && item.enabled)
   if (!action) return
 
+  if (action.variants?.length && !variantId) {
+    const variants = action.variants.filter((variant) => variant.enabled)
+    if (!variants.length) return
+    const menu = Menu.buildFromTemplate(
+      variants.map((variant) => ({ label: variant.label, click: () => showAction(action.id, variant.id) }))
+    )
+    if (toolbarWindow && !toolbarWindow.isDestroyed()) menu.popup({ window: toolbarWindow })
+    else menu.popup()
+    return
+  }
+
+  const selectedAction = variantId ? resolveActionVariant(action, variantId) : action
+  if (!selectedAction) return
+
   pendingAction = {
-    action,
+    action: selectedAction,
     selectedText: lastSelection.text,
     programName: lastSelection.programName,
     model: settings.model,
@@ -256,7 +271,7 @@ function registerIpc(): void {
     resultReady = true
     if (pendingAction && resultWindow) resultWindow.webContents.send('action:payload', pendingAction)
   })
-  ipcMain.on('selection:action', (_event, actionId: string) => showAction(actionId))
+  ipcMain.on('selection:action', (_event, actionId: string, variantId?: string) => showAction(actionId, variantId))
   ipcMain.on('toolbar:resize', (_event, size: { width: number; height: number }) => {
     if (!toolbarWindow || toolbarWindow.isDestroyed()) return
     const width = Math.max(220, Math.min(720, Math.ceil(size.width)))
@@ -285,7 +300,7 @@ function registerIpc(): void {
 
     void streamCompletion(settingsStore.get(), request.action, request.selectedText, controller.signal, (content) => {
       if (!event.sender.isDestroyed()) event.sender.send('ai:stream', { requestId: request.requestId, type: 'delta', content })
-    })
+    }, request.conversation)
       .then(() => {
         if (!event.sender.isDestroyed()) event.sender.send('ai:stream', { requestId: request.requestId, type: 'done' })
       })

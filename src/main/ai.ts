@@ -1,4 +1,8 @@
-import type { AppSettings, SelectionAction } from '../shared/types'
+import type { AIConversationMessage, AppSettings, SelectionAction } from '../shared/types'
+import { isDictionaryCandidate } from '../shared/actions'
+
+const MAX_HISTORY_MESSAGES = 16
+const MAX_HISTORY_CHARACTERS = 24_000
 
 export function buildChatCompletionsUrl(baseUrl: string): string {
   const normalized = baseUrl.trim().replace(/\/+$/, '')
@@ -6,25 +10,94 @@ export function buildChatCompletionsUrl(baseUrl: string): string {
   return `${normalized}/chat/completions`
 }
 
-export function buildMessages(action: SelectionAction, selectedText: string, targetLanguage: string) {
+export function buildMessages(
+  action: SelectionAction,
+  selectedText: string,
+  targetLanguage: string,
+  conversation: AIConversationMessage[] = [],
+  autoDictionary = false,
+  jsonExtractionSchema = ''
+) {
   const systemPrompts: Record<Exclude<SelectionAction['kind'], 'custom'>, string> = {
-    translate: `你是专业翻译。将用户提供的文本翻译为${targetLanguage}。只输出译文，保留原有段落和格式。`,
+    chat: '你是严谨、清晰的对话助手。围绕用户选中的文本回答后续问题；需要补充常识时应明确区分文本内容与补充信息。',
+    translate: `你是专业翻译。将用户提供的文本翻译为${targetLanguage}，保留原有段落和格式，并严格遵循用户给出的处理要求。`,
     explain: '你是清晰、准确的知识助手。解释用户提供的文本，必要时补充关键背景，但不要臆测。',
     summarize: '你是信息整理助手。提炼用户提供文本的核心观点和关键信息，使用简洁的要点。',
-    rewrite: '你是专业编辑。润色用户提供的文本，使表达自然、准确、简洁，同时保持原意和原语言。'
+    rewrite: '你是专业编辑。润色用户提供的文本，使表达自然、准确、简洁，同时保持原意和原语言。',
+    writing: '你是专业写作助手。严格遵循处理要求，保持事实准确，不虚构原文没有的信息。',
+    extract: '你是信息提取助手。只提取文本中有依据的信息，缺失内容不得臆测。',
+    analysis: '你是严谨的分析助手。区分原文事实、合理推断和补充背景。',
+    code: '你是资深软件工程师。保持代码行为和技术准确性，明确说明不确定或无法等价转换的部分。'
+  }
+  const history = trimConversation(conversation)
+
+  if (action.kind === 'chat') {
+    return [
+      { role: 'system' as const, content: systemPrompts.chat },
+      { role: 'user' as const, content: `用户选中的上下文：\n\n${selectedText}` },
+      ...history
+    ]
+  }
+
+  const baseUserContent = action.kind === 'custom'
+    ? `${action.prompt ?? ''}\n\n待处理文本：\n${selectedText}`
+    : action.prompt?.trim()
+      ? `处理要求：\n${action.prompt.trim()}\n\n待处理文本：\n${selectedText}`
+      : selectedText
+  const userContent = action.id === 'extract:json' && jsonExtractionSchema.trim()
+    ? `${baseUserContent}\n\nJSON 字段或 Schema 要求：\n${jsonExtractionSchema.trim()}`
+    : baseUserContent
+
+  if (history.length > 0) {
+    return [
+      {
+        role: 'system' as const,
+        content: '你是严谨、清晰的对话助手。先前已按用户要求处理选中文本；现在请结合原始文本、处理要求和会话历史回答最新问题。除非用户明确要求，否则不要机械重复原处理操作。'
+      },
+      { role: 'user' as const, content: userContent },
+      ...history
+    ]
   }
 
   if (action.kind === 'custom') {
     return [
       { role: 'system' as const, content: '严格按照用户给出的处理要求完成任务。' },
-      { role: 'user' as const, content: `${action.prompt ?? ''}\n\n待处理文本：\n${selectedText}` }
+      { role: 'user' as const, content: userContent }
     ]
   }
 
+  const systemPrompt = action.kind === 'explain' && autoDictionary && isDictionaryCandidate(selectedText)
+    ? '你是专业词典与术语助手。按“定义、读音、例句、同义词、专业背景”解释用户提供的短词或术语；不适用的项目明确说明。'
+    : systemPrompts[action.kind]
   return [
-    { role: 'system' as const, content: systemPrompts[action.kind] },
-    { role: 'user' as const, content: selectedText }
+    { role: 'system' as const, content: systemPrompt },
+    { role: 'user' as const, content: userContent }
   ]
+}
+
+function trimConversation(conversation: AIConversationMessage[]): AIConversationMessage[] {
+  const turns: AIConversationMessage[][] = []
+  for (const message of conversation) {
+    const currentTurn = turns.at(-1)
+    if (message.role === 'user' || !currentTurn) turns.push([message])
+    else currentTurn.push(message)
+  }
+
+  const selectedTurns: AIConversationMessage[][] = []
+  let messageCount = 0
+  let characterCount = 0
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index]
+    const turnCharacters = turn.reduce((total, message) => total + message.content.length, 0)
+    if (
+      selectedTurns.length > 0 &&
+      (messageCount + turn.length > MAX_HISTORY_MESSAGES || characterCount + turnCharacters > MAX_HISTORY_CHARACTERS)
+    ) break
+    selectedTurns.unshift(turn)
+    messageCount += turn.length
+    characterCount += turnCharacters
+  }
+  return selectedTurns.flat()
 }
 
 export async function streamCompletion(
@@ -32,7 +105,8 @@ export async function streamCompletion(
   action: SelectionAction,
   selectedText: string,
   signal: AbortSignal,
-  onDelta: (content: string) => void
+  onDelta: (content: string) => void,
+  conversation: AIConversationMessage[] = []
 ): Promise<void> {
   if (!settings.baseUrl.trim()) throw new Error('请先填写 API 地址')
   if (!settings.model.trim()) throw new Error('请先填写模型名称')
@@ -45,9 +119,16 @@ export async function streamCompletion(
     headers,
     body: JSON.stringify({
       model: settings.model.trim(),
-      messages: buildMessages(action, selectedText, settings.targetLanguage),
+      messages: buildMessages(
+        action,
+        selectedText,
+        settings.targetLanguage,
+        conversation,
+        settings.autoDictionary,
+        settings.jsonExtractionSchema
+      ),
       stream: true,
-      temperature: 0.2
+      temperature: action.kind === 'chat' ? 0.4 : 0.2
     }),
     signal
   })
