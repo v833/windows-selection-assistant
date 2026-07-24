@@ -1,6 +1,8 @@
 export type ThemeMode = 'system' | 'light' | 'dark'
-export type SettingsSection = 'general' | 'model' | 'actions' | 'about'
+export type SettingsSection = 'general' | 'model' | 'actions' | 'history' | 'about'
 export type AIErrorKind = 'authentication' | 'model' | 'rate_limit' | 'network' | 'timeout' | 'cancelled' | 'server' | 'configuration' | 'unknown'
+export type SessionContextMode = 'full' | 'truncate' | 'summarize'
+export type SessionExportFormat = 'markdown' | 'json'
 
 export type ActionKind = 'chat' | 'translate' | 'explain' | 'summarize' | 'rewrite' | 'writing' | 'extract' | 'analysis' | 'code' | 'custom'
 
@@ -27,6 +29,26 @@ export interface SelectionAction {
   variants?: ActionVariant[]
 }
 
+export interface ConversationSession {
+  id: string
+  title: string
+  selectedText: string
+  contextText: string
+  contextMode: SessionContextMode
+  contextStartIndex: number
+  programName: string
+  action: SelectionAction
+  model: string
+  createdAt: string
+  updatedAt: string
+  messages: AIConversationMessage[]
+}
+
+export interface SessionStorageInfo {
+  path: string
+  encrypted: boolean
+}
+
 export interface WindowBounds {
   x: number
   y: number
@@ -45,6 +67,8 @@ export interface AppSettings {
   autoDictionary: boolean
   jsonExtractionSchema: string
   maxInputCharacters: number
+  historyEnabled: boolean
+  historyRetentionLimit: number
   showRecentActions: boolean
   recentActionIds: string[]
   resultWindowBounds: WindowBounds | null
@@ -71,7 +95,9 @@ export interface ActionPayload {
   programName: string
   model: string
   maxInputCharacters: number
+  historyEnabled: boolean
   theme: ThemeMode
+  session?: ConversationSession
 }
 
 export interface AIRunRequest {
@@ -115,6 +141,14 @@ export interface SelectionAssistantAPI {
   onActionPayload: (listener: (payload: ActionPayload) => void) => () => void
   onAIStream: (listener: (event: AIStreamEvent) => void) => () => void
   onSettingsNavigate: (listener: (section: SettingsSection) => void) => () => void
+  listSessions: () => Promise<ConversationSession[]>
+  saveSession: (session: ConversationSession) => Promise<ConversationSession | null>
+  renameSession: (sessionId: string, title: string) => Promise<ConversationSession | null>
+  deleteSession: (sessionId: string) => Promise<boolean>
+  deleteAllSessions: () => Promise<void>
+  openSession: (sessionId: string) => void
+  exportSession: (sessionId: string, format: SessionExportFormat) => Promise<string | null>
+  getSessionStorageInfo: () => Promise<SessionStorageInfo>
   toolbarReady: () => void
   resultReady: () => void
   selectAction: (actionId: string, variantId?: string) => void

@@ -12,6 +12,10 @@ import {
   Copy,
   Eye,
   EyeOff,
+  FileJson,
+  FileText,
+  FolderOpen,
+  History,
   Info,
   Languages,
   LoaderCircle,
@@ -23,7 +27,9 @@ import {
   PenLine,
   Pin,
   PinOff,
+  RefreshCw,
   Save,
+  Search,
   Settings2,
   Sparkles,
   Sun,
@@ -34,7 +40,16 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { MAX_PINNED_ACTIONS, moveAction as moveActionInList, normalizeShortcut, validateActionShortcuts } from '../../../shared/toolbar'
-import type { AppInfo, AppSettings, AssistantStatus, SelectionAction, SettingsSection, ThemeMode } from '../../../shared/types'
+import type {
+  AppInfo,
+  AppSettings,
+  AssistantStatus,
+  ConversationSession,
+  SelectionAction,
+  SessionStorageInfo,
+  SettingsSection,
+  ThemeMode
+} from '../../../shared/types'
 
 type SettingsPatch = Partial<AppSettings> | ((settings: AppSettings) => Partial<AppSettings>)
 type SaveSettings = (patch: SettingsPatch, showConfirmation?: boolean) => Promise<string | null>
@@ -43,6 +58,7 @@ const navigation = [
   { id: 'general' as const, label: '常规', icon: Settings2 },
   { id: 'model' as const, label: '模型', icon: Bot },
   { id: 'actions' as const, label: '快捷动作', icon: WandSparkles },
+  { id: 'history' as const, label: '历史记录', icon: History },
   { id: 'about' as const, label: '关于', icon: Info }
 ]
 
@@ -149,6 +165,7 @@ export function MainApp() {
         {section === 'general' && <GeneralSettings settings={settings} status={status} save={save} />}
         {section === 'model' && <ModelSettings settings={settings} save={save} saved={saved} />}
         {section === 'actions' && <ActionSettings settings={settings} save={save} />}
+        {section === 'history' && <HistorySettings settings={settings} save={save} />}
         {section === 'about' && <About appInfo={appInfo} />}
       </main>
     </div>
@@ -474,6 +491,165 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
   )
 }
 
+function HistorySettings({ settings, save }: { settings: AppSettings; save: SaveSettings }) {
+  const [sessions, setSessions] = useState<ConversationSession[]>([])
+  const [storageInfo, setStorageInfo] = useState<SessionStorageInfo | null>(null)
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState('')
+  const [loadError, setLoadError] = useState(false)
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  const filtered = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase()
+    if (!normalized) return sessions
+    return sessions.filter((session) => [
+      session.title,
+      session.selectedText,
+      session.action.label,
+      session.model,
+      session.programName
+    ].some((value) => value.toLocaleLowerCase().includes(normalized)))
+  }, [query, sessions])
+
+  async function refresh() {
+    setLoading(true)
+    setMessage('')
+    setLoadError(false)
+    try {
+      const [nextSessions, nextStorageInfo] = await Promise.all([
+        window.selectionAPI.listSessions(),
+        window.selectionAPI.getSessionStorageInfo()
+      ])
+      setSessions(nextSessions)
+      setStorageInfo(nextStorageInfo)
+      return true
+    } catch (error) {
+      setSessions([])
+      setLoadError(true)
+      setMessage(`读取历史失败：${readableError(error)}`)
+      return false
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function rename(session: ConversationSession) {
+    const title = window.prompt('输入新的会话名称', session.title)
+    if (title === null || !title.trim()) return
+    setMessage('')
+    try {
+      const renamed = await window.selectionAPI.renameSession(session.id, title)
+      if (!renamed) throw new Error('会话不存在或已被删除')
+      if (await refresh()) setMessage('会话已重命名。')
+    } catch (error) {
+      setMessage(`重命名失败：${readableError(error)}`)
+    }
+  }
+
+  async function remove(session: ConversationSession) {
+    if (!window.confirm(`确定删除会话“${session.title}”吗？`)) return
+    setMessage('')
+    try {
+      const deleted = await window.selectionAPI.deleteSession(session.id)
+      if (!deleted) throw new Error('会话不存在或已被删除')
+      if (await refresh()) setMessage('会话已删除。')
+    } catch (error) {
+      setMessage(`删除失败：${readableError(error)}`)
+    }
+  }
+
+  async function removeAll() {
+    if ((!sessions.length && !loadError) || !window.confirm('确定删除全部本地会话历史吗？此操作无法撤销。')) return
+    setMessage('')
+    try {
+      await window.selectionAPI.deleteAllSessions()
+      setSessions([])
+      setLoadError(false)
+      setMessage('全部会话历史已删除。')
+    } catch (error) {
+      setMessage(`全部删除失败：${readableError(error)}`)
+    }
+  }
+
+  async function exportHistory(session: ConversationSession, format: 'markdown' | 'json') {
+    setMessage('')
+    try {
+      const path = await window.selectionAPI.exportSession(session.id, format)
+      if (path) setMessage(`已导出到 ${path}`)
+    } catch (error) {
+      setMessage(`导出失败：${readableError(error)}`)
+    }
+  }
+
+  return (
+    <SettingsPage title="历史记录" subtitle="管理可选的本地加密会话历史">
+      <section className="settings-section">
+        <SectionTitle icon={History} title="保存设置" />
+        <SettingRow title="保存会话历史" description="默认关闭；开启后才会把选区、动作、模型和消息加密保存到本机">
+          <Switch checked={settings.historyEnabled} onChange={(historyEnabled) => void save({ historyEnabled })} label="保存会话历史" />
+        </SettingRow>
+        <SettingRow title="最多保留" description="超过数量后自动删除最早更新的会话">
+          <input
+            className="history-retention-input"
+            type="number"
+            min={5}
+            max={200}
+            step={5}
+            value={settings.historyRetentionLimit}
+            onChange={(event) => void save({ historyRetentionLimit: Number(event.target.value) })}
+          />
+        </SettingRow>
+        <SettingRow title="存储位置" description={storageInfo?.encrypted ? '内容使用 Windows 安全存储加密' : '尚未读取存储信息'}>
+          <code className="history-path" title={storageInfo?.path}>{storageInfo?.path ?? '-'}</code>
+        </SettingRow>
+      </section>
+
+      <section className="settings-section history-section">
+        <div className="section-title-row">
+          <SectionTitle icon={History} title={`已保存会话（${sessions.length}）`} />
+          <div className="history-section-actions">
+            <button className="secondary-button compact" type="button" onClick={() => void refresh()}><RefreshCw size={14} />刷新</button>
+            <button className="secondary-button compact danger-text" type="button" onClick={() => void removeAll()} disabled={!sessions.length && !loadError}><Trash2 size={14} />全部删除</button>
+          </div>
+        </div>
+        <label className="history-search">
+          <Search size={15} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、选区、动作或模型" />
+        </label>
+        {message && <div className="history-message">{message}</div>}
+        {loading ? (
+          <div className="empty-row"><LoaderCircle className="spin" size={17} /></div>
+        ) : filtered.length ? (
+          <div className="history-list">
+            {filtered.map((session) => (
+              <article className="history-item" key={session.id}>
+                <button className="history-open" type="button" onClick={() => window.selectionAPI.openSession(session.id)}>
+                  <strong>{session.title}</strong>
+                  <span>{session.action.label} · {session.model || '未记录模型'} · {formatSessionTime(session.updatedAt)}</span>
+                  <p>{session.selectedText}</p>
+                </button>
+                <div className="history-item-actions">
+                  <button className="icon-button" type="button" onClick={() => window.selectionAPI.openSession(session.id)} title="打开会话" aria-label="打开会话"><FolderOpen size={15} /></button>
+                  <button className="icon-button" type="button" onClick={() => void rename(session)} title="重命名" aria-label="重命名"><PenLine size={15} /></button>
+                  <button className="icon-button" type="button" onClick={() => void exportHistory(session, 'markdown')} title="导出 Markdown" aria-label="导出 Markdown"><FileText size={15} /></button>
+                  <button className="icon-button" type="button" onClick={() => void exportHistory(session, 'json')} title="导出 JSON" aria-label="导出 JSON"><FileJson size={15} /></button>
+                  <button className="icon-button danger" type="button" onClick={() => void remove(session)} title="删除" aria-label="删除会话"><Trash2 size={15} /></button>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-row">{query ? '没有匹配的会话' : settings.historyEnabled ? '还没有保存的会话' : '历史记录默认关闭，开启后才会保存新会话'}</div>
+        )}
+      </section>
+    </SettingsPage>
+  )
+}
+
 function ActionRow({
   action,
   onToggle,
@@ -671,4 +847,16 @@ function applyTheme(theme: ThemeMode) {
 function readableError(error: unknown): string {
   const message = error instanceof Error ? error.message : '保存失败'
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
+}
+
+function formatSessionTime(value: string): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date)
 }

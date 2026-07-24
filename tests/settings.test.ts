@@ -43,4 +43,15 @@ describe('settings persistence', () => {
     expect(() => store.update({ theme: 'dark' })).toThrow('disk write failed')
     expect(store.get()).toEqual(before)
   })
+
+  it('keeps history disabled by default and migrates older settings', () => {
+    fileState.exists = true
+    fileState.persisted = JSON.stringify({ theme: 'dark', encryptedApiKey: '' })
+
+    const settings = new SettingsStore().get()
+
+    expect(settings.theme).toBe('dark')
+    expect(settings.historyEnabled).toBe(false)
+    expect(settings.historyRetentionLimit).toBe(50)
+  })
 })
