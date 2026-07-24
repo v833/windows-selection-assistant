@@ -28,6 +28,7 @@ const api: SelectionAssistantAPI = {
   toolbarReady: () => ipcRenderer.send('toolbar:ready'),
   resultReady: () => ipcRenderer.send('result:ready'),
   selectAction: (actionId: string, variantId?: string) => ipcRenderer.send('selection:action', actionId, variantId),
+  openActionMenu: () => ipcRenderer.send('toolbar:more'),
   resizeToolbar: (width: number, height: number) => ipcRenderer.send('toolbar:resize', { width, height }),
   runAI: (request) => ipcRenderer.send('ai:run', request),
   cancelAI: (requestId: string) => ipcRenderer.send('ai:cancel', requestId),

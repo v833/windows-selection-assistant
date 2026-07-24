@@ -6,6 +6,7 @@ import {
   Bot,
   Check,
   ChevronRight,
+  CircleAlert,
   CircleHelp,
   Code2,
   Copy,
@@ -20,20 +21,24 @@ import {
   Moon,
   Plus,
   PenLine,
+  Pin,
+  PinOff,
   Save,
   Settings2,
   Sparkles,
   Sun,
   Trash2,
   WandSparkles,
+  X,
   Zap
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { MAX_PINNED_ACTIONS, moveAction as moveActionInList, normalizeShortcut, validateActionShortcuts } from '../../../shared/toolbar'
 import type { AppInfo, AppSettings, AssistantStatus, SelectionAction, ThemeMode } from '../../../shared/types'
 
 type Section = 'general' | 'model' | 'actions' | 'about'
 type SettingsPatch = Partial<AppSettings> | ((settings: AppSettings) => Partial<AppSettings>)
-type SaveSettings = (patch: SettingsPatch, showConfirmation?: boolean) => Promise<void>
+type SaveSettings = (patch: SettingsPatch, showConfirmation?: boolean) => Promise<string | null>
 
 const navigation = [
   { id: 'general' as const, label: '常规', icon: Settings2 },
@@ -66,7 +71,7 @@ export function MainApp() {
 
   async function save(patchOrUpdater: SettingsPatch, showConfirmation = false) {
     const current = settingsRef.current
-    if (!current) return
+    if (!current) return null
 
     const patch = typeof patchOrUpdater === 'function' ? patchOrUpdater(current) : patchOrUpdater
     const optimistic = { ...current, ...patch }
@@ -77,7 +82,7 @@ export function MainApp() {
 
     try {
       const next = await window.selectionAPI.saveSettings(patch)
-      if (revision !== saveRevision.current) return
+      if (revision !== saveRevision.current) return null
       settingsRef.current = next
       setSettings(next)
       applyTheme(next.theme)
@@ -85,11 +90,13 @@ export function MainApp() {
         setSaved(true)
         window.setTimeout(() => setSaved(false), 1600)
       }
-    } catch {
-      if (revision !== saveRevision.current) return
+      return null
+    } catch (error) {
+      if (revision !== saveRevision.current) return null
       settingsRef.current = current
       setSettings(current)
       applyTheme(current.theme)
+      return readableError(error)
     }
   }
 
@@ -271,11 +278,13 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
   const [label, setLabel] = useState('')
   const [prompt, setPrompt] = useState('')
   const [jsonSchema, setJsonSchema] = useState(settings.jsonExtractionSchema)
+  const [shortcutError, setShortcutError] = useState('')
 
   useEffect(() => setJsonSchema(settings.jsonExtractionSchema), [settings.jsonExtractionSchema])
 
   const builtIns = useMemo(() => settings.actions.filter((action) => action.kind !== 'custom'), [settings.actions])
   const custom = useMemo(() => settings.actions.filter((action) => action.kind === 'custom'), [settings.actions])
+  const pinnedCount = useMemo(() => settings.actions.filter((action) => action.pinned).length, [settings.actions])
 
   function updateAction(id: string, patch: Partial<SelectionAction>) {
     void save((current) => ({
@@ -298,21 +307,39 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
 
   function moveAction(id: string, direction: -1 | 1) {
     void save((current) => {
-      const sourceIndex = current.actions.findIndex((action) => action.id === id)
-      if (sourceIndex < 0) return {}
-
-      const isCustom = current.actions[sourceIndex].kind === 'custom'
-      let targetIndex = sourceIndex + direction
-      while (targetIndex >= 0 && targetIndex < current.actions.length) {
-        if ((current.actions[targetIndex].kind === 'custom') === isCustom) break
-        targetIndex += direction
-      }
-      if (targetIndex < 0 || targetIndex >= current.actions.length) return {}
-
-      const actions = [...current.actions]
-      ;[actions[sourceIndex], actions[targetIndex]] = [actions[targetIndex], actions[sourceIndex]]
+      const selected = current.actions.find((action) => action.id === id)
+      if (!selected) return {}
+      const sameGroup = current.actions.filter((action) => (action.kind === 'custom') === (selected.kind === 'custom'))
+      const moved = moveActionInList(sameGroup, id, direction)
+      if (moved === sameGroup) return {}
+      let groupIndex = 0
+      const actions = current.actions.map((action) =>
+        (action.kind === 'custom') === (selected.kind === 'custom') ? moved[groupIndex++] : action
+      )
       return { actions }
     })
+  }
+
+  function togglePinned(action: SelectionAction) {
+    if (!action.pinned && pinnedCount >= MAX_PINNED_ACTIONS) {
+      setShortcutError(`工具栏最多固定 ${MAX_PINNED_ACTIONS} 个动作，请先取消一个固定动作`)
+      return
+    }
+    setShortcutError('')
+    updateAction(action.id, { pinned: !action.pinned })
+  }
+
+  async function updateShortcut(actionId: string, shortcut: string) {
+    const actions = settings.actions.map((action) =>
+      action.id === actionId ? { ...action, shortcut: shortcut || undefined } : action
+    )
+    const validationError = validateActionShortcuts(actions)
+    if (validationError) {
+      setShortcutError(validationError)
+      return
+    }
+    const error = await save({ actions })
+    setShortcutError(error ?? '')
   }
 
   function addAction() {
@@ -331,7 +358,7 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
   }
 
   return (
-    <SettingsPage title="快捷动作" subtitle="选择工具条中显示的处理方式">
+    <SettingsPage title="快捷动作" subtitle="固定常用动作，并为全部动作配置顺序与快捷键">
       <section className="settings-section">
         <SectionTitle icon={CircleHelp} title="智能路由" />
         <SettingRow title="短词词典模式" description="执行“解释”时，短词优先返回定义、读音、例句和专业背景">
@@ -360,6 +387,21 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
       </section>
 
       <section className="settings-section">
+        <SectionTitle icon={Pin} title="工具栏" />
+        <SettingRow title="固定动作" description={`只在工具栏显示常用动作，其余动作收纳到“更多”；最多固定 ${MAX_PINNED_ACTIONS} 个`}>
+          <code>{pinnedCount} / {MAX_PINNED_ACTIONS}</code>
+        </SettingRow>
+        <SettingRow title="最近使用" description="在“更多”菜单顶部显示最近执行的动作，不影响已固定动作">
+          <Switch
+            checked={settings.showRecentActions}
+            onChange={(showRecentActions) => void save({ showRecentActions })}
+            label="在更多菜单显示最近使用动作"
+          />
+        </SettingRow>
+        {shortcutError && <div className="settings-error" role="alert"><CircleAlert size={15} />{shortcutError}</div>}
+      </section>
+
+      <section className="settings-section">
         <SectionTitle icon={Sparkles} title="内置动作" />
         <div className="action-list">
           {builtIns.map((action, index) => (
@@ -368,6 +410,9 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
               action={action}
               onToggle={(enabled) => updateAction(action.id, { enabled })}
               onVariantToggle={(variantId, enabled) => updateVariant(action.id, variantId, enabled)}
+              onPin={() => togglePinned(action)}
+              pinDisabled={!action.pinned && pinnedCount >= MAX_PINNED_ACTIONS}
+              onShortcutChange={(shortcut) => void updateShortcut(action.id, shortcut)}
               onMoveUp={index > 0 ? () => moveAction(action.id, -1) : undefined}
               onMoveDown={index < builtIns.length - 1 ? () => moveAction(action.id, 1) : undefined}
             />
@@ -394,6 +439,9 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
               key={action.id}
               action={action}
               onToggle={(enabled) => updateAction(action.id, { enabled })}
+              onPin={() => togglePinned(action)}
+              pinDisabled={!action.pinned && pinnedCount >= MAX_PINNED_ACTIONS}
+              onShortcutChange={(shortcut) => void updateShortcut(action.id, shortcut)}
               onMoveUp={index > 0 ? () => moveAction(action.id, -1) : undefined}
               onMoveDown={index < custom.length - 1 ? () => moveAction(action.id, 1) : undefined}
               onDelete={() => void save((current) => ({ actions: current.actions.filter((item) => item.id !== action.id) }))}
@@ -409,6 +457,9 @@ function ActionRow({
   action,
   onToggle,
   onVariantToggle,
+  onPin,
+  pinDisabled,
+  onShortcutChange,
   onMoveUp,
   onMoveDown,
   onDelete
@@ -416,6 +467,9 @@ function ActionRow({
   action: SelectionAction
   onToggle: (enabled: boolean) => void
   onVariantToggle?: (variantId: string, enabled: boolean) => void
+  onPin: () => void
+  pinDisabled: boolean
+  onShortcutChange: (shortcut: string) => void
   onMoveUp?: () => void
   onMoveDown?: () => void
   onDelete?: () => void
@@ -433,6 +487,16 @@ function ActionRow({
             <ArrowDown size={15} />
           </button>
         </div>
+        <ShortcutInput action={action} onChange={onShortcutChange} />
+        <button
+          className={action.pinned ? 'icon-button pinned' : 'icon-button'}
+          onClick={onPin}
+          disabled={pinDisabled}
+          aria-label={action.pinned ? `取消固定${action.label}` : `固定${action.label}`}
+          aria-pressed={Boolean(action.pinned)}
+          title={action.pinned ? '取消固定' : '固定到工具栏'}>
+          {action.pinned ? <PinOff size={15} /> : <Pin size={15} />}
+        </button>
         {onDelete && <button className="icon-button danger" onClick={onDelete} aria-label={`删除${action.label}`}><Trash2 size={16} /></button>}
         <Switch checked={action.enabled} onChange={onToggle} label={`显示${action.label}`} />
       </div>
@@ -452,6 +516,69 @@ function ActionRow({
       )}
     </div>
   )
+}
+
+function ShortcutInput({ action, onChange }: { action: SelectionAction; onChange: (shortcut: string) => void }) {
+  function capture(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Tab') return
+    event.preventDefault()
+    if (event.key === 'Backspace' || event.key === 'Delete') {
+      onChange('')
+      return
+    }
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(event.key)) return
+
+    const key = shortcutKey(event)
+    if (!key) return
+    const parts = [
+      event.ctrlKey ? 'Ctrl' : '',
+      event.altKey ? 'Alt' : '',
+      event.shiftKey ? 'Shift' : '',
+      event.metaKey ? 'Super' : '',
+      key
+    ].filter(Boolean)
+    const shortcut = normalizeShortcut(parts.join('+'))
+    if (shortcut) onChange(shortcut)
+  }
+
+  return (
+    <div className="shortcut-control">
+      <input
+        value={action.shortcut ?? ''}
+        onKeyDown={capture}
+        onFocus={(event) => event.currentTarget.select()}
+        readOnly
+        placeholder="未设置"
+        aria-label={`设置${action.label}快捷键`}
+        title="点击后按下组合键"
+      />
+      {action.shortcut && (
+        <button className="shortcut-clear" onClick={() => onChange('')} aria-label={`清除${action.label}快捷键`} title="清除快捷键">
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function shortcutKey(event: ReactKeyboardEvent<HTMLInputElement>): string | null {
+  if (/^Key[A-Z]$/.test(event.code)) return event.code.slice(3)
+  if (/^Digit\d$/.test(event.code)) return event.code.slice(5)
+  if (/^F(?:[1-9]|1\d|2[0-4])$/.test(event.code)) return event.code
+  const names: Record<string, string> = {
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+    ArrowUp: 'Up',
+    Enter: 'Enter',
+    Escape: 'Esc',
+    Home: 'Home',
+    End: 'End',
+    PageDown: 'PageDown',
+    PageUp: 'PageUp',
+    Space: 'Space'
+  }
+  return names[event.code] ?? null
 }
 
 function About({ appInfo }: { appInfo: AppInfo | null }) {
@@ -518,4 +645,9 @@ function actionDescription(kind: SelectionAction['kind']) {
 
 function applyTheme(theme: ThemeMode) {
   document.documentElement.dataset.theme = theme
+}
+
+function readableError(error: unknown): string {
+  const message = error instanceof Error ? error.message : '保存失败'
+  return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }

@@ -63,6 +63,7 @@ body { color: var(--ink); background: transparent; font-size: 14px; }
 button, input, textarea { font: inherit; letter-spacing: 0; }
 button { color: inherit; border: 0; cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.5; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 input, textarea { color: var(--ink); background: var(--surface); border: 1px solid var(--line); outline: 0; }
 input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
@@ -136,6 +137,7 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .icon-button { width: 30px; height: 30px; display: inline-grid; place-items: center; border-radius: 6px; color: var(--muted); background: transparent; }
 .icon-button:hover { color: var(--ink); background: var(--surface-soft); }
 .icon-button.danger:hover { color: var(--danger); }
+.icon-button.pinned { color: var(--accent-deep); background: var(--accent-soft); }
 
 .action-list { border-top: 1px solid var(--line); }
 .action-group { border-bottom: 1px solid var(--line); }
@@ -147,6 +149,13 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .action-copy span { margin-top: 4px; color: var(--muted); font-size: 11px; }
 .action-order { display: flex; align-items: center; gap: 2px; }
 .action-order .icon-button:disabled { opacity: 0.25; pointer-events: none; }
+.shortcut-control { position: relative; width: 112px; flex: 0 0 112px; }
+.shortcut-control input { width: 100%; height: 30px; padding: 0 25px 0 8px; border-radius: 6px; color: var(--muted); background: var(--surface-soft); font-size: 11px; text-align: center; }
+.shortcut-control input::placeholder { color: var(--subtle); }
+.shortcut-clear { position: absolute; top: 5px; right: 4px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 4px; color: var(--subtle); background: transparent; }
+.shortcut-clear:hover { color: var(--ink); background: var(--surface-strong); }
+.settings-error { display: flex; align-items: flex-start; gap: 7px; margin-top: 12px; padding: 9px 10px; border-radius: 7px; color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, transparent); font-size: 12px; line-height: 1.4; }
+.settings-error svg { flex: 0 0 auto; margin-top: 1px; }
 .json-schema-setting { padding-top: 18px; border-top: 1px solid var(--line); }
 .json-schema-setting textarea { min-height: 72px; resize: vertical; }
 .json-schema-setting .form-actions { margin-top: 8px; }

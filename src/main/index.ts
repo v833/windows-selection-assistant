@@ -1,8 +1,35 @@
-import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  nativeImage,
+  screen,
+  Tray,
+  type MenuItemConstructorOptions
+} from 'electron'
 import { join } from 'node:path'
 import type { TextSelectionData } from 'selection-hook'
-import type { ActionPayload, AIRunRequest, AssistantStatus, SelectionPayload } from '../shared/types'
 import { resolveActionVariant } from '../shared/actions'
+import {
+  normalizeShortcut,
+  recordRecentAction,
+  sanitizeRecentActionIds,
+  splitToolbarActions,
+  validateActionShortcuts
+} from '../shared/toolbar'
+import type {
+  ActionPayload,
+  AIRunRequest,
+  AppSettings,
+  AssistantStatus,
+  SelectionAction,
+  SelectionPayload,
+  WindowBounds
+} from '../shared/types'
+import { fitWindowBoundsToArea } from '../shared/windowBounds'
 import { streamCompletion, testConnection } from './ai'
 import { SelectionService } from './selection'
 import { SettingsStore } from './settings'
@@ -18,6 +45,10 @@ let pendingAction: ActionPayload | null = null
 let toolbarReady = false
 let resultReady = false
 let isQuitting = false
+let resultWindowHasCustomBounds = false
+let ignoreResultBoundsEvents = false
+let resultBoundsTimer: NodeJS.Timeout | null = null
+let ignoreResultBoundsTimer: NodeJS.Timeout | null = null
 const requests = new Map<string, AbortController>()
 
 const preloadPath = join(__dirname, '../preload/index.js')
@@ -77,7 +108,7 @@ function createToolbarWindow(): BrowserWindow {
     transparent: true,
     backgroundColor: '#00000000',
     alwaysOnTop: true,
-    focusable: false,
+    focusable: true,
     resizable: false,
     skipTaskbar: true,
     hasShadow: true,
@@ -95,9 +126,11 @@ function createToolbarWindow(): BrowserWindow {
 }
 
 function createResultWindow(): BrowserWindow {
+  const storedBounds = settingsStore.get().resultWindowBounds
+  const initialBounds = storedBounds ? fitResultWindowBounds(storedBounds) : { width: 560, height: 600 }
+  resultWindowHasCustomBounds = Boolean(storedBounds)
   const window = new BrowserWindow({
-    width: 560,
-    height: 600,
+    ...initialBounds,
     minWidth: 420,
     minHeight: 360,
     show: false,
@@ -115,8 +148,18 @@ function createResultWindow(): BrowserWindow {
   })
 
   const webContentsId = window.webContents.id
+  window.on('moved', () => scheduleResultBoundsSave(window))
+  window.on('resized', () => scheduleResultBoundsSave(window))
+  window.on('close', () => {
+    if (resultWindowHasCustomBounds && !ignoreResultBoundsEvents) saveResultWindowBounds(window)
+  })
   window.on('closed', () => {
     abortRequestsFor(webContentsId)
+    if (resultBoundsTimer) clearTimeout(resultBoundsTimer)
+    if (ignoreResultBoundsTimer) clearTimeout(ignoreResultBoundsTimer)
+    resultBoundsTimer = null
+    ignoreResultBoundsTimer = null
+    ignoreResultBoundsEvents = false
     resultWindow = null
     resultReady = false
   })
@@ -134,10 +177,12 @@ function showMainWindow(): void {
 function selectionPayload(): SelectionPayload | null {
   if (!lastSelection) return null
   const settings = settingsStore.get()
+  const { pinned, overflow } = splitToolbarActions(settings.actions)
   return {
     text: lastSelection.text,
     programName: lastSelection.programName,
-    actions: settings.actions.filter((action) => action.enabled && (!action.variants || action.variants.some((variant) => variant.enabled))),
+    actions: pinned,
+    hasMoreActions: overflow.length > 0,
     theme: settings.theme
   }
 }
@@ -169,6 +214,16 @@ function showAction(actionId: string, variantId?: string): void {
   const selectedAction = variantId ? resolveActionVariant(action, variantId) : action
   if (!selectedAction) return
 
+  const isOverflowAction = splitToolbarActions(settings.actions).overflow.some((item) => item.id === action.id)
+  if (settings.showRecentActions && isOverflowAction) {
+    persistSettingsSafely({
+      recentActionIds: recordRecentAction(
+        sanitizeRecentActionIds(settings.recentActionIds, settings.actions),
+        action.id
+      )
+    }, '记录最近动作')
+  }
+
   pendingAction = {
     action: selectedAction,
     selectedText: lastSelection.text,
@@ -178,7 +233,9 @@ function showAction(actionId: string, variantId?: string): void {
   }
   toolbarWindow?.hide()
   resultWindow ??= createResultWindow()
-  positionResultWindow(resultWindow)
+  if (resultWindow.isMinimized()) resultWindow.restore()
+  if (resultWindowHasCustomBounds) restoreResultWindowBounds(resultWindow)
+  else positionResultWindow(resultWindow)
   resultWindow.show()
   resultWindow.focus()
   if (resultReady) resultWindow.webContents.send('action:payload', pendingAction)
@@ -194,7 +251,154 @@ function positionResultWindow(window: BrowserWindow): void {
   x = Math.max(area.x + 8, Math.min(x, area.x + area.width - bounds.width - 8))
   if (y + bounds.height > area.y + area.height - 8 && toolbarBounds) y = toolbarBounds.y - bounds.height - 8
   y = Math.max(area.y + 8, Math.min(y, area.y + area.height - bounds.height - 8))
-  window.setPosition(x, y, false)
+  setResultWindowBounds(window, { ...bounds, x, y })
+}
+
+function fitResultWindowBounds(bounds: WindowBounds): WindowBounds {
+  const display = screen.getDisplayMatching(bounds)
+  return fitWindowBoundsToArea(bounds, display.workArea, display.scaleFactor)
+}
+
+function setResultWindowBounds(window: BrowserWindow, bounds: WindowBounds): void {
+  ignoreResultBoundsEvents = true
+  if (ignoreResultBoundsTimer) clearTimeout(ignoreResultBoundsTimer)
+  window.setBounds(bounds, false)
+  ignoreResultBoundsTimer = setTimeout(() => {
+    ignoreResultBoundsEvents = false
+    ignoreResultBoundsTimer = null
+  }, 100)
+}
+
+function restoreResultWindowBounds(window: BrowserWindow): void {
+  const storedBounds = settingsStore.get().resultWindowBounds
+  if (!storedBounds) return
+  const fitted = fitResultWindowBounds(storedBounds)
+  setResultWindowBounds(window, fitted)
+  if (JSON.stringify(fitted) !== JSON.stringify(storedBounds)) {
+    persistSettingsSafely({ resultWindowBounds: fitted }, '修正结果窗口位置')
+  }
+}
+
+function scheduleResultBoundsSave(window: BrowserWindow): void {
+  if (ignoreResultBoundsEvents || window.isDestroyed()) return
+  resultWindowHasCustomBounds = true
+  if (resultBoundsTimer) clearTimeout(resultBoundsTimer)
+  resultBoundsTimer = setTimeout(() => {
+    resultBoundsTimer = null
+    saveResultWindowBounds(window)
+  }, 250)
+}
+
+function saveResultWindowBounds(window: BrowserWindow): void {
+  if (window.isDestroyed()) return
+  const bounds = fitResultWindowBounds(window.getBounds())
+  persistSettingsSafely({ resultWindowBounds: bounds }, '保存结果窗口位置')
+}
+
+function persistSettingsSafely(patch: Partial<AppSettings>, operation: string): void {
+  try {
+    settingsStore.update(patch)
+  } catch (error) {
+    console.error(`${operation}失败`, error)
+  }
+}
+
+function actionMenuItem(action: SelectionAction): MenuItemConstructorOptions {
+  const variants = action.variants?.filter((variant) => variant.enabled)
+  if (variants?.length) {
+    return {
+      label: action.label,
+      submenu: variants.map((variant) => ({
+        label: variant.label,
+        click: () => showAction(action.id, variant.id)
+      }))
+    }
+  }
+  return {
+    label: action.label,
+    ...(action.shortcut ? { accelerator: action.shortcut } : {}),
+    click: () => showAction(action.id)
+  }
+}
+
+function showMoreActions(): void {
+  const settings = settingsStore.get()
+  const { overflow } = splitToolbarActions(settings.actions)
+  if (!overflow.length) return
+
+  const overflowById = new Map(overflow.map((action) => [action.id, action]))
+  const recent = settings.showRecentActions
+    ? settings.recentActionIds.map((id) => overflowById.get(id)).filter((action): action is SelectionAction => Boolean(action))
+    : []
+  const template: MenuItemConstructorOptions[] = []
+  if (recent.length) {
+    template.push({ label: '最近使用', submenu: recent.map(actionMenuItem) }, { type: 'separator' })
+  }
+  template.push(...overflow.map(actionMenuItem))
+  const menu = Menu.buildFromTemplate(template)
+  if (toolbarWindow && !toolbarWindow.isDestroyed()) menu.popup({ window: toolbarWindow })
+  else menu.popup()
+}
+
+function applyActionShortcuts(actions: SelectionAction[]): string | null {
+  const validationError = validateActionShortcuts(actions)
+  if (validationError) return validationError
+
+  globalShortcut.unregisterAll()
+  for (const action of actions) {
+    const error = registerActionShortcut(action)
+    if (error) {
+      globalShortcut.unregisterAll()
+      return error
+    }
+  }
+  return null
+}
+
+function applyAvailableActionShortcuts(actions: SelectionAction[]): string[] {
+  const validationError = validateActionShortcuts(actions)
+  if (validationError) return [validationError]
+
+  globalShortcut.unregisterAll()
+  const errors: string[] = []
+  for (const action of actions) {
+    const error = registerActionShortcut(action)
+    if (error) errors.push(error)
+  }
+  return errors
+}
+
+function registerActionShortcut(action: SelectionAction): string | null {
+  if (!action.enabled || !action.shortcut) return null
+  const shortcut = normalizeShortcut(action.shortcut)
+  if (!shortcut) return null
+  try {
+    if (!globalShortcut.register(shortcut, () => runShortcutAction(action.id))) {
+      return `快捷键 ${shortcut} 已被其他应用占用`
+    }
+  } catch {
+    return `无法注册快捷键 ${shortcut}`
+  }
+  return null
+}
+
+function runShortcutAction(actionId: string): void {
+  if (mainWindow?.isFocused()) return
+  const selection = selectionService.getCurrentSelection()
+  if (!selection) return
+  lastSelection = selection
+  showAction(actionId)
+}
+
+function reportShortcutErrors(errors: string[]): void {
+  if (!errors.length) return
+  const message = [...new Set(errors)].join('\n')
+  console.error('部分全局快捷键注册失败', message)
+  tray?.displayBalloon({
+    title: '划词助手快捷键不可用',
+    content: message,
+    iconType: 'warning'
+  })
 }
 
 function broadcastStatus(status: AssistantStatus): void {
@@ -243,7 +447,29 @@ function registerIpc(): void {
   ipcMain.handle('settings:get', () => settingsStore.get())
   ipcMain.handle('settings:save', (_event, patch) => {
     const before = settingsStore.get()
-    const settings = settingsStore.update(patch)
+    let nextPatch = patch
+    if (patch.actions) {
+      const validationError = validateActionShortcuts(patch.actions)
+      if (validationError) throw new Error(validationError)
+      const actions = patch.actions.map((action: SelectionAction) => {
+        const shortcut = normalizeShortcut(action.shortcut)
+        return { ...action, shortcut: shortcut ?? undefined }
+      })
+      const shortcutError = applyActionShortcuts(actions)
+      if (shortcutError) {
+        applyActionShortcuts(before.actions)
+        throw new Error(shortcutError)
+      }
+      nextPatch = { ...patch, actions }
+    }
+
+    let settings
+    try {
+      settings = settingsStore.update(nextPatch)
+    } catch (error) {
+      if (patch.actions) applyActionShortcuts(before.actions)
+      throw error
+    }
     if (settings.enabled !== before.enabled) selectionService.setEnabled(settings.enabled)
     if (settings.launchAtLogin !== before.launchAtLogin) {
       app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
@@ -272,6 +498,7 @@ function registerIpc(): void {
     if (pendingAction && resultWindow) resultWindow.webContents.send('action:payload', pendingAction)
   })
   ipcMain.on('selection:action', (_event, actionId: string, variantId?: string) => showAction(actionId, variantId))
+  ipcMain.on('toolbar:more', showMoreActions)
   ipcMain.on('toolbar:resize', (_event, size: { width: number; height: number }) => {
     if (!toolbarWindow || toolbarWindow.isDestroyed()) return
     const width = Math.max(220, Math.min(720, Math.ceil(size.width)))
@@ -347,7 +574,9 @@ app.whenReady().then(() => {
     broadcastStatus
   )
   registerIpc()
+  const shortcutErrors = applyAvailableActionShortcuts(settingsStore.get().actions)
   createTray()
+  reportShortcutErrors(shortcutErrors)
   mainWindow = createMainWindow()
   const settings = settingsStore.get()
   app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
@@ -357,6 +586,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   isQuitting = true
   selectionService?.cleanup()
+  globalShortcut.unregisterAll()
   for (const controller of requests.values()) controller.abort()
 })
 

@@ -5,25 +5,27 @@ function variant(id: string, label: string, prompt: string): ActionVariant {
 }
 
 export const defaultActions: SelectionAction[] = [
-  { id: 'chat', label: '问答', kind: 'chat', enabled: true },
+  { id: 'chat', label: '问答', kind: 'chat', enabled: true, pinned: true },
   {
     id: 'translate',
     label: '翻译',
     kind: 'translate',
     enabled: true,
+    pinned: true,
     variants: [
       variant('direct', '直接翻译', '翻译为目标语言，只输出译文并保留原有格式。'),
       variant('back-translation', '反向翻译', '先翻译为目标语言，再将译文回译为原文语言。按“译文、回译、差异说明”三个部分输出。')
     ]
   },
-  { id: 'explain', label: '解释', kind: 'explain', enabled: true },
-  { id: 'summarize', label: '总结', kind: 'summarize', enabled: true },
-  { id: 'rewrite', label: '润色', kind: 'rewrite', enabled: true },
+  { id: 'explain', label: '解释', kind: 'explain', enabled: true, pinned: true },
+  { id: 'summarize', label: '总结', kind: 'summarize', enabled: true, pinned: true },
+  { id: 'rewrite', label: '润色', kind: 'rewrite', enabled: true, pinned: true },
   {
     id: 'writing',
     label: '写作',
     kind: 'writing',
     enabled: true,
+    pinned: false,
     variants: [
       variant('proofread', '纠错', '检查错别字、语法和标点。先给出修正后的完整文本，再逐条说明修改原因。'),
       variant('shorten', '精简为一句话', '压缩为一句准确、完整的话，保留最关键的信息。'),
@@ -46,6 +48,7 @@ export const defaultActions: SelectionAction[] = [
     label: '提取',
     kind: 'extract',
     enabled: true,
+    pinned: false,
     variants: [
       variant('dates', '日期时间', '提取所有日期、时间、期限和时间范围，按出现顺序列出。'),
       variant('people', '人物组织', '提取人物、组织及其在文本中的角色或关系。'),
@@ -60,6 +63,7 @@ export const defaultActions: SelectionAction[] = [
     label: '分析',
     kind: 'analysis',
     enabled: true,
+    pinned: false,
     variants: [
       variant('terminology', '术语解释', '按“定义、读音、例句、同义词、专业背景”解释核心术语；不适用的项目明确说明。'),
       variant('viewpoint', '观点分析', '提取论点、证据、隐含假设、潜在风险和可能的反驳，并区分原文事实与推断。')
@@ -70,6 +74,7 @@ export const defaultActions: SelectionAction[] = [
     label: '代码',
     kind: 'code',
     enabled: true,
+    pinned: false,
     variants: [
       variant('explain', '解释代码', '说明代码用途、执行流程、关键数据结构和复杂部分。'),
       variant('diagnose', '查找问题', '检查代码中的错误、边界条件、安全风险和性能问题，并给出最小修复建议。'),
@@ -87,12 +92,15 @@ export function mergeDefaultActions(actions: SelectionAction[]): SelectionAction
   const defaultsById = new Map(defaultActions.map((action) => [action.id, action]))
   const merged = actions.map((action) => {
     const defaultAction = defaultsById.get(action.id)
-    if (!defaultAction?.variants) return action
+    if (!defaultAction) return { pinned: false, ...action }
 
     const variantsById = new Map((action.variants ?? []).map((item) => [item.id, item]))
     return {
+      ...defaultAction,
       ...action,
-      variants: defaultAction.variants.map((item) => ({ ...item, ...variantsById.get(item.id) }))
+      ...(defaultAction.variants
+        ? { variants: defaultAction.variants.map((item) => ({ ...item, ...variantsById.get(item.id) })) }
+        : {})
     }
   })
 
