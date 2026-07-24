@@ -2,6 +2,7 @@ import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { defaultActions, mergeDefaultActions } from '../shared/actions'
+import { DEFAULT_MAX_INPUT_CHARACTERS, normalizeMaxInputCharacters } from '../shared/textLimits'
 import { limitPinnedActions, normalizeShortcut, sanitizeRecentActionIds } from '../shared/toolbar'
 import type { AppSettings, SelectionAction, WindowBounds } from '../shared/types'
 import { isWindowBounds } from '../shared/windowBounds'
@@ -20,6 +21,7 @@ const defaults: AppSettings = {
   targetLanguage: '简体中文',
   autoDictionary: true,
   jsonExtractionSchema: '',
+  maxInputCharacters: DEFAULT_MAX_INPUT_CHARACTERS,
   showRecentActions: true,
   recentActionIds: [],
   resultWindowBounds: null,
@@ -42,11 +44,15 @@ export class SettingsStore {
     const recentActionIds = showRecentActions
       ? sanitizeRecentActionIds(patch.recentActionIds ?? this.settings.recentActionIds, actions)
       : []
+    const maxInputCharacters = normalizeMaxInputCharacters(
+      patch.maxInputCharacters ?? this.settings.maxInputCharacters
+    )
     const nextSettings: AppSettings = {
       ...this.settings,
       ...patch,
       showRecentActions,
       recentActionIds,
+      maxInputCharacters,
       resultWindowBounds: patch.resultWindowBounds === undefined
         ? this.settings.resultWindowBounds
         : this.sanitizeWindowBounds(patch.resultWindowBounds),
@@ -74,6 +80,7 @@ export class SettingsStore {
         jsonExtractionSchema: typeof persisted.jsonExtractionSchema === 'string'
           ? persisted.jsonExtractionSchema.slice(0, 2000)
           : '',
+        maxInputCharacters: normalizeMaxInputCharacters(persisted.maxInputCharacters),
         showRecentActions,
         recentActionIds: showRecentActions ? sanitizeRecentActionIds(persisted.recentActionIds, actions) : [],
         resultWindowBounds: this.sanitizeWindowBounds(persisted.resultWindowBounds),

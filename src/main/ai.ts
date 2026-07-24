@@ -1,8 +1,7 @@
 import type { AIConversationMessage, AppSettings, SelectionAction } from '../shared/types'
 import { isDictionaryCandidate } from '../shared/actions'
-
-const MAX_HISTORY_MESSAGES = 16
-const MAX_HISTORY_CHARACTERS = 24_000
+import { classifyAIError } from '../shared/aiErrors'
+import { trimConversationForRequest } from '../shared/textLimits'
 
 export function buildChatCompletionsUrl(baseUrl: string): string {
   const normalized = baseUrl.trim().replace(/\/+$/, '')
@@ -29,7 +28,7 @@ export function buildMessages(
     analysis: '你是严谨的分析助手。区分原文事实、合理推断和补充背景。',
     code: '你是资深软件工程师。保持代码行为和技术准确性，明确说明不确定或无法等价转换的部分。'
   }
-  const history = trimConversation(conversation)
+  const history = trimConversationForRequest(conversation).messages
 
   if (action.kind === 'chat') {
     return [
@@ -75,31 +74,6 @@ export function buildMessages(
   ]
 }
 
-function trimConversation(conversation: AIConversationMessage[]): AIConversationMessage[] {
-  const turns: AIConversationMessage[][] = []
-  for (const message of conversation) {
-    const currentTurn = turns.at(-1)
-    if (message.role === 'user' || !currentTurn) turns.push([message])
-    else currentTurn.push(message)
-  }
-
-  const selectedTurns: AIConversationMessage[][] = []
-  let messageCount = 0
-  let characterCount = 0
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index]
-    const turnCharacters = turn.reduce((total, message) => total + message.content.length, 0)
-    if (
-      selectedTurns.length > 0 &&
-      (messageCount + turn.length > MAX_HISTORY_MESSAGES || characterCount + turnCharacters > MAX_HISTORY_CHARACTERS)
-    ) break
-    selectedTurns.unshift(turn)
-    messageCount += turn.length
-    characterCount += turnCharacters
-  }
-  return selectedTurns.flat()
-}
-
 export async function streamCompletion(
   settings: AppSettings,
   action: SelectionAction,
@@ -114,7 +88,7 @@ export async function streamCompletion(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`
 
-  const response = await fetch(buildChatCompletionsUrl(settings.baseUrl), {
+  const response = await fetchWithTimeout(buildChatCompletionsUrl(settings.baseUrl), {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -134,8 +108,8 @@ export async function streamCompletion(
   })
 
   if (!response.ok) {
-    const detail = (await response.text()).slice(0, 600)
-    throw new Error(`请求失败（${response.status}）${detail ? `：${detail}` : ''}`)
+    const detail = await readLimitedResponseText(response, 600)
+    throw new AIResponseError(detail, response.status)
   }
   if (!response.body) throw new Error('模型服务未返回内容')
 
@@ -143,27 +117,23 @@ export async function streamCompletion(
   const decoder = new TextDecoder()
   let buffer = ''
 
-  while (true) {
-    const { value, done } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done })
-    const lines = buffer.split(/\r?\n/)
-    buffer = lines.pop() ?? ''
+  try {
+    while (true) {
+      const { value, done } = await readStreamChunk(reader)
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() ?? ''
 
-    for (const line of lines) {
-      const payload = line.trim().replace(/^data:\s*/, '')
-      if (!payload || payload === '[DONE]') continue
-      try {
-        const data = JSON.parse(payload) as {
-          choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>
-        }
-        const content = data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content
-        if (content) onDelta(content)
-      } catch {
-        continue
+      for (const line of lines) {
+        processStreamLine(line, onDelta)
       }
-    }
 
-    if (done) break
+      if (done) break
+    }
+    processStreamLine(buffer, onDelta)
+  } catch (error) {
+    await reader.cancel().catch(() => undefined)
+    throw error
   }
 }
 
@@ -176,7 +146,7 @@ export async function testConnection(settings: Pick<AppSettings, 'baseUrl' | 'ap
   if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`
 
   try {
-    const response = await fetch(buildChatCompletionsUrl(settings.baseUrl), {
+    const response = await fetchWithTimeout(buildChatCompletionsUrl(settings.baseUrl), {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -187,11 +157,110 @@ export async function testConnection(settings: Pick<AppSettings, 'baseUrl' | 'ap
       })
     })
     if (!response.ok) {
-      const detail = (await response.text()).slice(0, 240)
-      return { ok: false, message: `连接失败（${response.status}）${detail ? `：${detail}` : ''}` }
+      const detail = await readLimitedResponseText(response, 240)
+      throw new AIResponseError(detail, response.status)
     }
+    if (response.body) await response.body.cancel().catch(() => undefined)
     return { ok: true, message: '连接成功' }
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : '连接失败' }
+    return { ok: false, message: classifyAIError(error).message }
+  }
+}
+
+class AIResponseError extends Error {
+  constructor(
+    readonly detail: string,
+    readonly status?: number,
+    readonly code?: string
+  ) {
+    super(detail || (status ? `HTTP ${status}` : '模型服务返回错误'))
+    this.name = 'AIResponseError'
+  }
+}
+
+function processStreamLine(line: string, onDelta: (content: string) => void): void {
+  const payload = line.trim().replace(/^data:\s*/, '')
+  if (!payload || payload === '[DONE]') return
+
+  let data: {
+    choices?: Array<{ delta?: { content?: string }; message?: { content?: string } }>
+    error?: string | { message?: string; type?: string; code?: string | number; status?: number }
+    status?: number
+  }
+  try {
+    data = JSON.parse(payload) as typeof data
+  } catch {
+    return
+  }
+
+  if (data.error !== undefined) {
+    const providerError = typeof data.error === 'string' ? { message: data.error } : data.error
+    const detail = [providerError.message, providerError.type, providerError.code]
+      .filter((value) => value !== undefined && value !== '')
+      .join(' ')
+    const status = providerError.status ?? data.status
+    const code = providerError.code === undefined ? undefined : String(providerError.code)
+    throw new AIResponseError(detail, status, code)
+  }
+
+  const content = data.choices?.[0]?.delta?.content ?? data.choices?.[0]?.message?.content
+  if (content) onDelta(content)
+}
+
+async function readLimitedResponseText(
+  response: Response,
+  maxCharacters: number,
+  timeoutMs = 10_000
+): Promise<string> {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+
+  try {
+    while (text.length < maxCharacters) {
+      const { value, done } = await readStreamChunk(reader, timeoutMs)
+      text += decoder.decode(value, { stream: !done })
+      if (done) break
+    }
+  } catch {
+    return text.slice(0, maxCharacters)
+  } finally {
+    await reader.cancel().catch(() => undefined)
+  }
+
+  return text.slice(0, maxCharacters)
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = 30_000): Promise<Response> {
+  const timeoutController = new AbortController()
+  const timeoutId = setTimeout(() => {
+    timeoutController.abort(new DOMException('请求超时', 'TimeoutError'))
+  }, timeoutMs)
+  const signal = init.signal
+    ? AbortSignal.any([init.signal, timeoutController.signal])
+    : timeoutController.signal
+
+  try {
+    return await fetch(input, { ...init, signal })
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+async function readStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs = 60_000
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeoutId: NodeJS.Timeout | null = null
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => reject(new DOMException('流式响应超时', 'TimeoutError')), timeoutMs)
+      })
+    ])
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
   }
 }

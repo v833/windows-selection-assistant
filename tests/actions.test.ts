@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   defaultActions,
+  getEnabledActionVariants,
   isDictionaryCandidate,
   mergeDefaultActions,
   resolveActionVariant
@@ -89,6 +90,20 @@ describe('selection actions', () => {
     expect(resolved).toMatchObject({ id: 'writing:proofread', label: '纠错', kind: 'writing' })
     expect(resolved?.prompt).toContain('错别字')
     expect(resolved?.variants).toBeUndefined()
+  })
+
+  it('returns a single enabled variant for direct execution', () => {
+    const translate = structuredClone(defaultActions.find((action) => action.id === 'translate'))
+    if (!translate?.variants) throw new Error('translate action is missing variants')
+
+    translate.variants[1].enabled = false
+    const variants = getEnabledActionVariants(translate)
+
+    expect(variants.map((variant) => variant.id)).toEqual(['direct'])
+    expect(resolveActionVariant(translate, variants[0].id)).toMatchObject({
+      id: 'translate:direct',
+      label: '直接翻译'
+    })
   })
 
   it('recognizes short words but rejects sentences and long text', () => {

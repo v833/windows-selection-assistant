@@ -34,9 +34,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { MAX_PINNED_ACTIONS, moveAction as moveActionInList, normalizeShortcut, validateActionShortcuts } from '../../../shared/toolbar'
-import type { AppInfo, AppSettings, AssistantStatus, SelectionAction, ThemeMode } from '../../../shared/types'
+import type { AppInfo, AppSettings, AssistantStatus, SelectionAction, SettingsSection, ThemeMode } from '../../../shared/types'
 
-type Section = 'general' | 'model' | 'actions' | 'about'
 type SettingsPatch = Partial<AppSettings> | ((settings: AppSettings) => Partial<AppSettings>)
 type SaveSettings = (patch: SettingsPatch, showConfirmation?: boolean) => Promise<string | null>
 
@@ -48,7 +47,7 @@ const navigation = [
 ]
 
 export function MainApp() {
-  const [section, setSection] = useState<Section>('general')
+  const [section, setSection] = useState<SettingsSection>('general')
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [status, setStatus] = useState<AssistantStatus>({ enabled: false, running: false })
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
@@ -66,7 +65,12 @@ export function MainApp() {
         applyTheme(nextSettings.theme)
       }
     )
-    return window.selectionAPI.onStatusChanged(setStatus)
+    const unsubscribeStatus = window.selectionAPI.onStatusChanged(setStatus)
+    const unsubscribeNavigation = window.selectionAPI.onSettingsNavigate(setSection)
+    return () => {
+      unsubscribeStatus()
+      unsubscribeNavigation()
+    }
   }, [])
 
   async function save(patchOrUpdater: SettingsPatch, showConfirmation = false) {
@@ -253,6 +257,17 @@ function ModelSettings({
             <input value={draft.targetLanguage} onChange={(event) => setDraft({ ...draft, targetLanguage: event.target.value })} placeholder="简体中文" />
           </label>
         </div>
+        <label className="field-label">
+          <span>长文本提醒阈值（字符）</span>
+          <input
+            type="number"
+            min={1000}
+            max={200000}
+            step={1000}
+            value={draft.maxInputCharacters}
+            onChange={(event) => setDraft({ ...draft, maxInputCharacters: Number(event.target.value) })}
+          />
+        </label>
         <div className="form-actions">
           <div className={`connection-result ${testResult?.ok ? 'success' : 'error'}`}>
             {testResult && <><span className="status-dot online" />{testResult.message}</>}
@@ -263,7 +278,13 @@ function ModelSettings({
           </button>
           <button
             className="primary-button"
-            onClick={() => void save({ baseUrl: draft.baseUrl, apiKey: draft.apiKey, model: draft.model, targetLanguage: draft.targetLanguage }, true)}>
+            onClick={() => void save({
+              baseUrl: draft.baseUrl,
+              apiKey: draft.apiKey,
+              model: draft.model,
+              targetLanguage: draft.targetLanguage,
+              maxInputCharacters: draft.maxInputCharacters
+            }, true)}>
             {saved ? <Check size={16} /> : <Save size={16} />}
             {saved ? '已保存' : '保存'}
           </button>

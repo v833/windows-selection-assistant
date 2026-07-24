@@ -1,6 +1,31 @@
-import { describe, expect, it } from 'vitest'
-import { buildChatCompletionsUrl, buildMessages } from '../src/main/ai'
-import type { AIConversationMessage } from '../src/shared/types'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { buildChatCompletionsUrl, buildMessages, streamCompletion } from '../src/main/ai'
+import type { AIConversationMessage, AppSettings, SelectionAction } from '../src/shared/types'
+
+afterEach(() => vi.unstubAllGlobals())
+
+const streamAction: SelectionAction = {
+  id: 'chat',
+  label: '问答',
+  kind: 'chat',
+  enabled: true
+}
+const streamSettings = {
+  enabled: true,
+  launchAtLogin: false,
+  theme: 'system',
+  baseUrl: 'https://example.com/v1',
+  apiKey: '',
+  model: 'test-model',
+  targetLanguage: '简体中文',
+  autoDictionary: false,
+  jsonExtractionSchema: '',
+  maxInputCharacters: 30_000,
+  showRecentActions: true,
+  recentActionIds: [],
+  resultWindowBounds: null,
+  actions: [streamAction]
+} satisfies AppSettings
 
 describe('AI request helpers', () => {
   it('appends the chat completions path to an OpenAI-compatible base URL', () => {
@@ -162,5 +187,56 @@ describe('AI request helpers', () => {
     expect(history.length).toBeLessThanOrEqual(16)
     expect(history[0].role).toBe('user')
     expect(history.at(-1)).toEqual({ role: 'user', content: '问题 9' })
+  })
+
+  it('emits a final stream payload without a trailing newline', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"尾部内容"}}]}',
+      { status: 200 }
+    )))
+    const chunks: string[] = []
+
+    await streamCompletion(
+      streamSettings,
+      streamAction,
+      '原文',
+      new AbortController().signal,
+      (content) => chunks.push(content)
+    )
+
+    expect(chunks).toEqual(['尾部内容'])
+  })
+
+  it('propagates provider errors delivered inside a successful stream', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      'data: {"error":{"message":"rate limit exceeded","code":"rate_limit_exceeded","status":429}}',
+      { status: 200 }
+    )))
+
+    await expect(streamCompletion(
+      streamSettings,
+      streamAction,
+      '原文',
+      new AbortController().signal,
+      () => undefined
+    )).rejects.toMatchObject({
+      status: 429,
+      code: 'rate_limit_exceeded'
+    })
+  })
+
+  it('limits error response details before propagating them', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('x'.repeat(2000), { status: 500 })))
+
+    await expect(streamCompletion(
+      streamSettings,
+      streamAction,
+      '原文',
+      new AbortController().signal,
+      () => undefined
+    )).rejects.toMatchObject({
+      status: 500,
+      detail: 'x'.repeat(600)
+    })
   })
 })
