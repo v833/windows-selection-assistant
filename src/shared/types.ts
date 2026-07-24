@@ -19,8 +19,17 @@ export interface SelectionAction {
   label: string
   kind: ActionKind
   enabled: boolean
+  pinned?: boolean
+  shortcut?: string
   prompt?: string
   variants?: ActionVariant[]
+}
+
+export interface WindowBounds {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export interface AppSettings {
@@ -33,6 +42,9 @@ export interface AppSettings {
   targetLanguage: string
   autoDictionary: boolean
   jsonExtractionSchema: string
+  showRecentActions: boolean
+  recentActionIds: string[]
+  resultWindowBounds: WindowBounds | null
   actions: SelectionAction[]
 }
 
@@ -46,6 +58,7 @@ export interface SelectionPayload {
   text: string
   programName: string
   actions: SelectionAction[]
+  hasMoreActions: boolean
   theme: ThemeMode
 }
 
@@ -90,6 +103,7 @@ export interface SelectionAssistantAPI {
   toolbarReady: () => void
   resultReady: () => void
   selectAction: (actionId: string, variantId?: string) => void
+  openActionMenu: () => void
   resizeToolbar: (width: number, height: number) => void
   runAI: (request: AIRunRequest) => void
   cancelAI: (requestId: string) => void

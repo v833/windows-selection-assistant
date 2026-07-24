@@ -66,6 +66,8 @@ describe('selection actions', () => {
     const merged = mergeDefaultActions(oldActions)
 
     expect(merged.find((action) => action.id === 'chat')?.enabled).toBe(false)
+    expect(merged.find((action) => action.id === 'chat')?.pinned).toBe(true)
+    expect(merged.find((action) => action.id === 'writing')?.pinned).toBe(false)
     expect(merged.find((action) => action.id === 'custom-old')?.prompt).toBe('保留我')
     expect(merged.find((action) => action.id === 'translate')?.variants).toHaveLength(2)
     expect(merged.find((action) => action.id === 'writing')).toBeDefined()

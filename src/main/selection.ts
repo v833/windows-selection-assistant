@@ -29,6 +29,21 @@ export class SelectionService {
     return { enabled: this.enabled, running: this.running }
   }
 
+  getCurrentSelection(): TextSelectionData | null {
+    if (!this.running || !this.hook) return null
+    try {
+      const selection = this.hook.getCurrentSelection()
+      return selection?.text.trim() ? selection : null
+    } catch (error) {
+      this.onStatus({
+        enabled: this.enabled,
+        running: this.running,
+        error: error instanceof Error ? error.message : '读取当前选区失败'
+      })
+      return null
+    }
+  }
+
   cleanup(): void {
     this.stop()
     this.hook?.cleanup()
@@ -42,7 +57,7 @@ export class SelectionService {
       this.hook.on('text-selection', this.handleSelection)
       this.hook.on('mouse-down', this.handleMouseDown)
       this.hook.on('mouse-wheel', this.handleDismiss)
-      this.hook.on('key-down', this.handleDismiss)
+      this.hook.on('key-down', this.handleKeyDown)
       this.hook.on('error', this.handleError)
       this.running = this.hook.start({
         enableClipboard: true,
@@ -77,7 +92,7 @@ export class SelectionService {
     this.hook.off('text-selection', this.handleSelection)
     this.hook.off('mouse-down', this.handleMouseDown)
     this.hook.off('mouse-wheel', this.handleDismiss)
-    this.hook.off('key-down', this.handleDismiss)
+    this.hook.off('key-down', this.handleKeyDown)
     this.hook.off('error', this.handleError)
   }
 
@@ -133,6 +148,11 @@ export class SelectionService {
 
   private handleDismiss = (): void => {
     this.toolbarWindow()?.hide()
+  }
+
+  private handleKeyDown = (): void => {
+    const window = this.toolbarWindow()
+    if (!window?.isFocused()) window?.hide()
   }
 
   private handleError = (error: Error): void => {
