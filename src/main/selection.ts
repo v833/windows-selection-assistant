@@ -11,6 +11,7 @@ export class SelectionService {
   private hook: SelectionHook | null = null
   private running = false
   private enabled = false
+  private menuOpen = false
 
   constructor(
     private readonly toolbarWindow: () => BrowserWindow | null,
@@ -42,6 +43,10 @@ export class SelectionService {
       })
       return null
     }
+  }
+
+  setMenuOpen(open: boolean): void {
+    this.menuOpen = open
   }
 
   cleanup(): void {
@@ -80,6 +85,7 @@ export class SelectionService {
 
   private stop(): void {
     if (!this.hook) return
+    this.menuOpen = false
     this.detachListeners()
     if (this.running) this.hook.stop()
     this.running = false
@@ -134,6 +140,7 @@ export class SelectionService {
   }
 
   private handleMouseDown = (event: MouseEventData): void => {
+    if (this.menuOpen) return
     const window = this.toolbarWindow()
     if (!window?.isVisible()) return
     const point = screen.screenToDipPoint({ x: event.x, y: event.y })
@@ -147,10 +154,12 @@ export class SelectionService {
   }
 
   private handleDismiss = (): void => {
+    if (this.menuOpen) return
     this.toolbarWindow()?.hide()
   }
 
   private handleKeyDown = (): void => {
+    if (this.menuOpen) return
     const window = this.toolbarWindow()
     if (!window?.isFocused()) window?.hide()
   }
