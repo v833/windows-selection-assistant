@@ -1,6 +1,6 @@
 {
   "name": "selection-assistant",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "独立的 Windows AI 划词助手",
   "main": "./out/main/index.js",
   "author": "v833 <2507301541@qq.com>",
