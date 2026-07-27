@@ -12,7 +12,8 @@ import {
   screen,
   shell,
   Tray,
-  type MenuItemConstructorOptions
+  type MenuItemConstructorOptions,
+  type NativeImage
 } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -23,6 +24,7 @@ import { sanitizeExternalUrl } from '../shared/markdown'
 import { resolveRequestProfile } from '../shared/providers'
 import { serializeSession } from '../shared/sessions'
 import {
+  groupActionsForMenu,
   normalizeShortcut,
   recordRecentAction,
   sanitizeRecentActionIds,
@@ -64,6 +66,7 @@ let ignoreResultBoundsEvents = false
 let resultBoundsTimer: NodeJS.Timeout | null = null
 let ignoreResultBoundsTimer: NodeJS.Timeout | null = null
 const requests = new Map<string, AbortController>()
+const actionMenuIconCache = new Map<string, NativeImage>()
 
 const preloadPath = join(__dirname, '../preload/index.js')
 const titleBarHeight = 44
@@ -105,7 +108,7 @@ function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 960,
     height: 680,
-    minWidth: 820,
+    minWidth: 680,
     minHeight: 580,
     show: false,
     title: '划词助手',
@@ -382,6 +385,7 @@ function actionMenuItem(action: SelectionAction): MenuItemConstructorOptions {
   if (variants.length > 1) {
     return {
       label: action.label,
+      icon: actionMenuIcon(action),
       submenu: variants.map((variant) => ({
         label: variant.label,
         click: () => showAction(action.id, variant.id)
@@ -390,9 +394,37 @@ function actionMenuItem(action: SelectionAction): MenuItemConstructorOptions {
   }
   return {
     label: action.label,
+    icon: actionMenuIcon(action),
     ...(action.shortcut ? { accelerator: action.shortcut } : {}),
     click: () => showAction(action.id, variants[0]?.id)
   }
+}
+
+function actionMenuIcon(action: SelectionAction): NativeImage | undefined {
+  const dark = nativeTheme.shouldUseDarkColors
+  const glyph = Array.from(action.label.trim())[0] ?? 'AI'
+  const cacheKey = `${dark ? 'dark' : 'light'}:${glyph}`
+  const cached = actionMenuIconCache.get(cacheKey)
+  if (cached) return cached
+
+  const background = dark ? '#34415f' : '#e8eefc'
+  const foreground = dark ? '#d9e2fa' : '#35539b'
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><rect width="18" height="18" rx="5" fill="${background}"/><text x="9" y="9.5" text-anchor="middle" dominant-baseline="middle" fill="${foreground}" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="10" font-weight="600">${escapeXml(glyph)}</text></svg>`
+  const icon = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`)
+  if (icon.isEmpty()) return undefined
+  const resized = icon.resize({ width: 16, height: 16 })
+  actionMenuIconCache.set(cacheKey, resized)
+  return resized
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&apos;'
+  })[character] ?? character)
 }
 
 function showMoreActions(): void {
@@ -408,7 +440,11 @@ function showMoreActions(): void {
   if (recent.length) {
     template.push({ label: '最近使用', submenu: recent.map(actionMenuItem) }, { type: 'separator' })
   }
-  template.push(...overflow.map(actionMenuItem))
+  groupActionsForMenu(overflow).forEach((section, index) => {
+    if (index > 0) template.push({ type: 'separator' })
+    template.push({ label: section.label, enabled: false })
+    template.push(...section.actions.map(actionMenuItem))
+  })
   const menu = Menu.buildFromTemplate(template)
   popupActionMenu(menu)
 }

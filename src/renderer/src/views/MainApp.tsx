@@ -148,7 +148,7 @@ export function MainApp() {
           {navigation.map((item) => {
             const Icon = item.icon
             return (
-              <button key={item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)}>
+              <button key={item.id} className={section === item.id ? 'active' : ''} onClick={() => setSection(item.id)} aria-label={item.label} title={item.label}>
                 <Icon size={17} />
                 <span>{item.label}</span>
                 {section === item.id && <ChevronRight size={15} />}
@@ -428,7 +428,7 @@ function ModelSettings({
           </label>
         </div>
         <div className="form-actions">
-          <div className={`connection-result ${testResult?.ok ? 'success' : 'error'}`}>
+          <div className={`connection-result ${testResult?.ok ? 'success' : 'error'}`} role="status" aria-live="polite">
             {testResult && <><span className="status-dot online" />{testResult.message}</>}
           </div>
           <button className="secondary-button" onClick={() => void test()} disabled={testing || !selectedProvider}>
@@ -755,16 +755,15 @@ function HistorySettings({ settings, save }: { settings: AppSettings; save: Save
           <SectionTitle icon={History} title={`已保存会话（${sessions.length}）`} />
           <div className="history-section-actions">
             <button className="secondary-button compact" type="button" onClick={() => void refresh()}><RefreshCw size={14} />刷新</button>
-            <button className="secondary-button compact danger-text" type="button" onClick={() => void removeAll()} disabled={!sessions.length && !loadError}><Trash2 size={14} />全部删除</button>
           </div>
         </div>
         <label className="history-search">
           <Search size={15} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称、选区、动作或模型" />
         </label>
-        {message && <div className="history-message">{message}</div>}
+        {message && <div className="history-message" role="status">{message}</div>}
         {loading ? (
-          <div className="empty-row"><LoaderCircle className="spin" size={17} /></div>
+          <div className="empty-row" role="status" aria-label="正在加载会话"><LoaderCircle className="spin" size={17} /></div>
         ) : filtered.length ? (
           <div className="history-list">
             {filtered.map((session) => (
@@ -787,6 +786,10 @@ function HistorySettings({ settings, save }: { settings: AppSettings; save: Save
         ) : (
           <div className="empty-row">{query ? '没有匹配的会话' : settings.historyEnabled ? '还没有保存的会话' : '历史记录默认关闭，开启后才会保存新会话'}</div>
         )}
+        <div className="history-danger-zone">
+          <div><strong>危险操作</strong><span>永久删除本机保存的全部会话，无法撤销</span></div>
+          <button className="secondary-button compact danger-text" type="button" onClick={() => void removeAll()} disabled={!sessions.length && !loadError}><Trash2 size={14} />全部删除</button>
+        </div>
       </section>
     </SettingsPage>
   )
@@ -822,37 +825,41 @@ function ActionRow({
   return (
     <div className="action-group">
       <div className="action-row">
-        <div className="action-icon">{actionIcon(action.kind)}</div>
-        <div className="action-copy"><strong>{action.label}</strong><span>{action.prompt ?? actionDescription(action.kind)}</span></div>
-        <div className="action-order">
-          <button className="icon-button" onClick={onMoveUp} disabled={!onMoveUp} aria-label={`上移${action.label}`} title="上移">
-            <ArrowUp size={15} />
-          </button>
-          <button className="icon-button" onClick={onMoveDown} disabled={!onMoveDown} aria-label={`下移${action.label}`} title="下移">
-            <ArrowDown size={15} />
-          </button>
+        <div className="action-row-main">
+          <div className="action-icon">{actionIcon(action.kind)}</div>
+          <div className="action-copy"><strong>{action.label}</strong><span>{action.prompt ?? actionDescription(action.kind)}</span></div>
         </div>
-        <ShortcutInput action={action} onChange={onShortcutChange} />
-        <button
-          className={advanced ? 'icon-button pinned' : 'icon-button'}
-          type="button"
-          onClick={() => setAdvanced(!advanced)}
-          aria-expanded={advanced}
-          aria-label={`配置${action.label}的模型与提示词`}
-          title="模型与提示词">
-          {advanced ? <ChevronDown size={15} /> : <Settings2 size={15} />}
-        </button>
-        <button
-          className={action.pinned ? 'icon-button pinned' : 'icon-button'}
-          onClick={onPin}
-          disabled={pinDisabled}
-          aria-label={action.pinned ? `取消固定${action.label}` : `固定${action.label}`}
-          aria-pressed={Boolean(action.pinned)}
-          title={action.pinned ? '取消固定' : '固定到工具栏'}>
-          {action.pinned ? <PinOff size={15} /> : <Pin size={15} />}
-        </button>
-        {onDelete && <button className="icon-button danger" onClick={onDelete} aria-label={`删除${action.label}`}><Trash2 size={16} /></button>}
-        <Switch checked={action.enabled} onChange={onToggle} label={`显示${action.label}`} />
+        <div className="action-row-controls">
+          <div className="action-order">
+            <button className="icon-button" onClick={onMoveUp} disabled={!onMoveUp} aria-label={`上移${action.label}`} title="上移">
+              <ArrowUp size={15} />
+            </button>
+            <button className="icon-button" onClick={onMoveDown} disabled={!onMoveDown} aria-label={`下移${action.label}`} title="下移">
+              <ArrowDown size={15} />
+            </button>
+          </div>
+          <ShortcutInput action={action} onChange={onShortcutChange} />
+          <button
+            className={advanced ? 'icon-button pinned' : 'icon-button'}
+            type="button"
+            onClick={() => setAdvanced(!advanced)}
+            aria-expanded={advanced}
+            aria-label={`配置${action.label}的模型与提示词`}
+            title="模型与提示词">
+            {advanced ? <ChevronDown size={15} /> : <Settings2 size={15} />}
+          </button>
+          <button
+            className={action.pinned ? 'icon-button pinned' : 'icon-button'}
+            onClick={onPin}
+            disabled={pinDisabled}
+            aria-label={action.pinned ? `取消固定${action.label}` : `固定${action.label}`}
+            aria-pressed={Boolean(action.pinned)}
+            title={action.pinned ? '取消固定' : '固定到工具栏'}>
+            {action.pinned ? <PinOff size={15} /> : <Pin size={15} />}
+          </button>
+          {onDelete && <button className="icon-button danger" onClick={onDelete} aria-label={`删除${action.label}`} title="删除动作"><Trash2 size={16} /></button>}
+          <Switch checked={action.enabled} onChange={onToggle} label={`显示${action.label}`} />
+        </div>
       </div>
       {action.variants && action.variants.length > 0 && onVariantToggle && (
         <div className="action-variant-list" aria-label={`${action.label}的二级选项`}>
@@ -1100,7 +1107,7 @@ function SettingRow({ title, description, children }: { title: string; descripti
 }
 
 function Switch({ checked, onChange, label }: { checked: boolean; onChange: (checked: boolean) => void; label: string }) {
-  return <button className={`switch ${checked ? 'checked' : ''}`} role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}><span /></button>
+  return <button className={`switch ${checked ? 'checked' : ''}`} type="button" role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}><span /></button>
 }
 
 function actionIcon(kind: SelectionAction['kind']) {
