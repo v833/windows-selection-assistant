@@ -3,6 +3,34 @@ import type { SelectionAction } from './types'
 export const MAX_PINNED_ACTIONS = 6
 export const MAX_RECENT_ACTIONS = 5
 
+export interface ActionMenuSection {
+  label: string
+  actions: SelectionAction[]
+}
+
+const actionMenuSectionLabels: Record<SelectionAction['kind'], string> = {
+  chat: '阅读与理解',
+  translate: '阅读与理解',
+  explain: '阅读与理解',
+  summarize: '阅读与理解',
+  rewrite: '写作与回复',
+  writing: '写作与回复',
+  extract: '提取与分析',
+  analysis: '提取与分析',
+  code: '代码工具',
+  custom: '自定义动作'
+}
+
+export function groupActionsForMenu(actions: SelectionAction[]): ActionMenuSection[] {
+  return actions.reduce<ActionMenuSection[]>((sections, action) => {
+    const label = actionMenuSectionLabels[action.kind]
+    const current = sections.at(-1)
+    if (current?.label === label) current.actions.push(action)
+    else sections.push({ label, actions: [action] })
+    return sections
+  }, [])
+}
+
 export function splitToolbarActions(actions: SelectionAction[]): {
   pinned: SelectionAction[]
   overflow: SelectionAction[]

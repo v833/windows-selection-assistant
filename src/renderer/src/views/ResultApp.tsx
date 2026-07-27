@@ -488,28 +488,30 @@ export function ResultApp() {
           <strong>{payload?.action.label ?? '划词助手'}</strong>
         </div>
         <div className="window-controls">
-          <button onClick={() => window.selectionAPI.openSettings()} aria-label="设置"><Settings size={15} /></button>
-          <button onClick={() => window.selectionAPI.minimizeWindow()} aria-label="最小化"><Minus size={16} /></button>
-          <button className="close" onClick={() => window.selectionAPI.closeWindow()} aria-label="关闭"><X size={16} /></button>
+          <button onClick={() => window.selectionAPI.openSettings()} aria-label="设置" title="打开设置"><Settings size={15} /></button>
+          <button onClick={() => window.selectionAPI.minimizeWindow()} aria-label="最小化" title="最小化"><Minus size={16} /></button>
+          <button className="close" onClick={() => window.selectionAPI.closeWindow()} aria-label="关闭" title="关闭"><X size={16} /></button>
         </div>
       </header>
 
       <section className="source-strip">
         <div className="source-header">
-          <span>{payload?.programName || '选中文本'}</span>
+          <span>原文 · {payload?.programName || '选中文本'}</span>
           {payload && (
             <div>
               <small>{payload.selectedText.length.toLocaleString()} 字符 · 约 {sourceTokenCount.toLocaleString()} tokens</small>
-              {payload.selectedText.length > 180 && (
-                <button type="button" onClick={() => setSourceExpanded(!sourceExpanded)}>
-                  {sourceExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                  {sourceExpanded ? '收起' : '展开'}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setSourceExpanded(!sourceExpanded)}
+                aria-expanded={sourceExpanded}
+                aria-controls="selected-source">
+                {sourceExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                {sourceExpanded ? '收起' : '查看'}
+              </button>
             </div>
           )}
         </div>
-        <p className={sourceExpanded ? 'expanded' : ''}>{payload?.selectedText}</p>
+        <p id="selected-source" className="expanded" hidden={!sourceExpanded}>{payload?.selectedText}</p>
         {sourceStrategy === 'truncate' && <em>当前请求使用截断后的 {effectiveSelectedText.length.toLocaleString()} 字符内容</em>}
         {sourceSummary && <em>当前请求使用模型压缩后的 {sourceSummary.length.toLocaleString()} 字符摘要</em>}
       </section>
@@ -546,10 +548,10 @@ export function ResultApp() {
           ))}
           {messages.length > 0 && contextStartIndex === messages.length && <div className="context-divider">上下文已清空，下一条消息将开始新上下文</div>}
           {state === 'loading' && activePhase === 'source-summary' && (
-            <div className="result-loading"><LoaderCircle className="spin" size={20} /><span>正在压缩长文本{streaming ? ` · 已生成 ${streaming.length.toLocaleString()} 字符` : ''}</span></div>
+            <div className="result-loading" role="status" aria-live="polite"><LoaderCircle className="spin" size={20} /><span>正在压缩长文本{streaming ? ` · 已生成 ${streaming.length.toLocaleString()} 字符` : ''}</span></div>
           )}
           {state === 'loading' && activePhase === 'answer' && !streaming && (
-            <div className="result-loading"><LoaderCircle className="spin" size={20} /><span>正在思考</span></div>
+            <div className="result-loading" role="status" aria-live="polite"><LoaderCircle className="spin" size={20} /><span>正在思考</span></div>
           )}
           {streaming && activePhase === 'answer' && (
             <article className="conversation-message assistant streaming">
@@ -570,7 +572,7 @@ export function ResultApp() {
               </div>
             </div>
           )}
-          {notice && <div className="request-notice">{notice}</div>}
+          {notice && <div className="request-notice" role="status">{notice}</div>}
         </div>
       </main>
 
@@ -589,7 +591,9 @@ export function ResultApp() {
           />
           <div className="composer-meta">
             <span>{draft.length.toLocaleString()} 字符 · 约 {draftTokenCount.toLocaleString()} tokens</span>
-            <span>本次上下文 {historyUsage.messages.length} 条消息 · {requestCharacters.toLocaleString()} 字符 · 约 {requestTokens.toLocaleString()} tokens</span>
+            <span className="context-usage" title={`本次上下文 ${requestCharacters.toLocaleString()} 字符，约 ${requestTokens.toLocaleString()} tokens`}>
+              上下文 {historyUsage.messages.length} 条 · 约 {requestTokens.toLocaleString()} tokens
+            </span>
             {historyUsage.omittedMessages > 0 && <strong>将省略较早的 {historyUsage.omittedMessages} 条消息</strong>}
           </div>
         </div>
@@ -610,10 +614,10 @@ export function ResultApp() {
           )}
         </div>
         <div className="result-footer-actions">
-          <button className="session-command" type="button" onClick={startNewConversation} disabled={!payload || state === 'loading'}><MessageSquarePlus size={14} />新会话</button>
-          <button className="session-command" type="button" onClick={clearContext} disabled={!messages.length || contextStartIndex === messages.length || state === 'loading'}><Eraser size={14} />清上下文</button>
-          <button className="result-action" onClick={regenerate} disabled={!canRegenerate} aria-label="重新生成" data-tooltip="重新生成"><RefreshCw size={16} /></button>
-          <button className="result-action" onClick={() => void copy()} disabled={!latestAnswer} aria-label="复制最近回答" data-tooltip="复制最近回答">{copied ? <Check size={16} /> : <Copy size={16} />}</button>
+          <button className="session-command" type="button" onClick={startNewConversation} disabled={!payload || state === 'loading'} title="开始新会话"><MessageSquarePlus size={14} />新会话</button>
+          <button className="session-command" type="button" onClick={clearContext} disabled={!messages.length || contextStartIndex === messages.length || state === 'loading'} title="清空当前会话上下文"><Eraser size={14} />清上下文</button>
+          <button className="result-action" onClick={regenerate} disabled={!canRegenerate} aria-label="重新生成" title="重新生成"><RefreshCw size={16} /></button>
+          <button className="result-action" onClick={() => void copy()} disabled={!latestAnswer} aria-label="复制最近回答" title="复制最近回答">{copied ? <Check size={16} /> : <Copy size={16} />}</button>
         </div>
       </footer>
     </div>

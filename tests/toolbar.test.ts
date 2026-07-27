@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   MAX_PINNED_ACTIONS,
+  groupActionsForMenu,
   limitPinnedActions,
   moveAction,
   normalizeShortcut,
@@ -57,6 +58,26 @@ describe('toolbar actions', () => {
       'action-4',
       'action-3',
       'action-2'
+    ])
+  })
+
+  it('groups overflow actions without changing configured order', () => {
+    const actions = [
+      action(1, { kind: 'translate' }),
+      action(2, { kind: 'explain' }),
+      action(3, { kind: 'writing' }),
+      action(4, { kind: 'code' }),
+      action(5, { kind: 'custom' })
+    ]
+
+    expect(groupActionsForMenu(actions).map((section) => ({
+      label: section.label,
+      ids: section.actions.map((item) => item.id)
+    }))).toEqual([
+      { label: '阅读与理解', ids: ['action-1', 'action-2'] },
+      { label: '写作与回复', ids: ['action-3'] },
+      { label: '代码工具', ids: ['action-4'] },
+      { label: '自定义动作', ids: ['action-5'] }
     ])
   })
 
