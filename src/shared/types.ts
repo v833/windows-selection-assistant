@@ -13,6 +13,33 @@ export interface ActionVariant {
   prompt: string
 }
 
+export interface ProviderProfile {
+  id: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  defaultModel: string
+  defaultTemperature?: number
+  defaultMaxOutputTokens?: number
+}
+
+export interface ActionRequestProfile {
+  providerId?: string
+  model?: string
+  temperature?: number
+  maxOutputTokens?: number
+}
+
+export interface ResolvedRequestProfile {
+  providerId: string
+  providerName: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  temperature: number
+  maxOutputTokens?: number
+}
+
 export interface AIConversationMessage {
   role: 'user' | 'assistant'
   content: string
@@ -26,6 +53,7 @@ export interface SelectionAction {
   pinned?: boolean
   shortcut?: string
   prompt?: string
+  requestProfile?: ActionRequestProfile
   variants?: ActionVariant[]
 }
 
@@ -60,9 +88,8 @@ export interface AppSettings {
   enabled: boolean
   launchAtLogin: boolean
   theme: ThemeMode
-  baseUrl: string
-  apiKey: string
-  model: string
+  providers: ProviderProfile[]
+  defaultProviderId: string
   targetLanguage: string
   autoDictionary: boolean
   jsonExtractionSchema: string
@@ -104,6 +131,7 @@ export interface AIRunRequest {
   requestId: string
   action: SelectionAction
   selectedText: string
+  programName: string
   conversation: AIConversationMessage[]
 }
 
@@ -134,7 +162,7 @@ export interface SelectionAssistantAPI {
   saveSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>
   getStatus: () => Promise<AssistantStatus>
   setEnabled: (enabled: boolean) => Promise<AssistantStatus>
-  testConnection: (draft: Pick<AppSettings, 'baseUrl' | 'apiKey' | 'model'>) => Promise<{ ok: boolean; message: string }>
+  testConnection: (draft: ProviderProfile) => Promise<{ ok: boolean; message: string }>
   getAppInfo: () => Promise<AppInfo>
   onStatusChanged: (listener: (status: AssistantStatus) => void) => () => void
   onSelectionChanged: (listener: (payload: SelectionPayload) => void) => () => void

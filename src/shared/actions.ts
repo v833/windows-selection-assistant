@@ -116,11 +116,12 @@ export function mergeDefaultActions(actions: SelectionAction[]): SelectionAction
 export function resolveActionVariant(action: SelectionAction, variantId: string): SelectionAction | null {
   const selected = action.variants?.find((item) => item.id === variantId && item.enabled)
   if (!selected) return null
+  const prompt = [action.prompt?.trim(), selected.prompt.trim()].filter(Boolean).join('\n\n')
   return {
     ...action,
     id: `${action.id}:${selected.id}`,
     label: selected.label,
-    prompt: selected.prompt,
+    prompt,
     variants: undefined
   }
 }

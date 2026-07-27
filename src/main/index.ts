@@ -19,6 +19,7 @@ import type { TextSelectionData } from 'selection-hook'
 import { getEnabledActionVariants, resolveActionVariant } from '../shared/actions'
 import { classifyAIError } from '../shared/aiErrors'
 import { sanitizeExternalUrl } from '../shared/markdown'
+import { resolveRequestProfile } from '../shared/providers'
 import { serializeSession } from '../shared/sessions'
 import {
   normalizeShortcut,
@@ -234,6 +235,7 @@ function showAction(actionId: string, variantId?: string): void {
 
   const selectedAction = selectedVariantId ? resolveActionVariant(action, selectedVariantId) : action
   if (!selectedAction) return
+  const requestProfile = resolveRequestProfile(settings, selectedAction)
 
   const isOverflowAction = splitToolbarActions(settings.actions).overflow.some((item) => item.id === action.id)
   if (settings.showRecentActions && isOverflowAction) {
@@ -249,7 +251,7 @@ function showAction(actionId: string, variantId?: string): void {
     action: selectedAction,
     selectedText: lastSelection.text,
     programName: lastSelection.programName,
-    model: settings.model,
+    model: requestProfile.model,
     maxInputCharacters: settings.maxInputCharacters,
     historyEnabled: settings.historyEnabled,
     theme: settings.theme
@@ -268,11 +270,12 @@ function showSession(sessionId: string): void {
   const session = sessionStore.get(sessionId)
   if (!session) return
   const settings = settingsStore.get()
+  const requestProfile = resolveRequestProfile(settings, session.action)
   pendingAction = {
     action: session.action,
     selectedText: session.selectedText,
     programName: session.programName,
-    model: settings.model,
+    model: requestProfile.model,
     maxInputCharacters: settings.maxInputCharacters,
     historyEnabled: settings.historyEnabled,
     theme: settings.theme,
@@ -609,7 +612,7 @@ function registerIpc(): void {
 
     void streamCompletion(settingsStore.get(), request.action, request.selectedText, controller.signal, (content) => {
       if (!event.sender.isDestroyed()) event.sender.send('ai:stream', { requestId: request.requestId, type: 'delta', content })
-    }, request.conversation)
+    }, request.conversation, request.programName)
       .then(() => {
         if (!event.sender.isDestroyed()) event.sender.send('ai:stream', { requestId: request.requestId, type: 'done' })
       })

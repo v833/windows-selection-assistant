@@ -148,6 +148,7 @@ export function ResultApp() {
       requestId: id,
       action: activeRequest.action,
       selectedText: activeRequest.selectedText,
+      programName: activeRequest.payload.programName,
       conversation
     })
   }, [])

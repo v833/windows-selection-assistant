@@ -5,6 +5,7 @@ import {
   BrainCircuit,
   Bot,
   Check,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   CircleHelp,
@@ -39,12 +40,16 @@ import {
   Zap
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { getUnknownPromptVariables, renderPromptTemplate } from '../../../shared/promptVariables'
+import { MAX_OUTPUT_TOKENS, resolveRequestProfile } from '../../../shared/providers'
 import { MAX_PINNED_ACTIONS, moveAction as moveActionInList, normalizeShortcut, validateActionShortcuts } from '../../../shared/toolbar'
 import type {
+  ActionRequestProfile,
   AppInfo,
   AppSettings,
   AssistantStatus,
   ConversationSession,
+  ProviderProfile,
   SelectionAction,
   SessionStorageInfo,
   SettingsSection,
@@ -228,80 +233,211 @@ function ModelSettings({
   saved: boolean
 }) {
   const [draft, setDraft] = useState(settings)
+  const [selectedProviderId, setSelectedProviderId] = useState(settings.defaultProviderId)
   const [showKey, setShowKey] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
 
-  useEffect(() => setDraft(settings), [settings])
+  useEffect(() => {
+    setDraft(settings)
+    setSelectedProviderId((current) => settings.providers.some((provider) => provider.id === current)
+      ? current
+      : settings.defaultProviderId)
+  }, [settings])
+
+  const selectedProvider = draft.providers.find((provider) => provider.id === selectedProviderId)
+    ?? draft.providers[0]
+  const referencedActions = selectedProvider
+    ? draft.actions.filter((action) => action.requestProfile?.providerId === selectedProvider.id)
+    : []
+
+  function updateProvider(patch: Partial<ProviderProfile>) {
+    if (!selectedProvider) return
+    setDraft((current) => ({
+      ...current,
+      providers: current.providers.map((provider) => provider.id === selectedProvider.id
+        ? { ...provider, ...patch }
+        : provider)
+    }))
+    setTestResult(null)
+  }
+
+  function addProvider() {
+    const provider: ProviderProfile = {
+      id: crypto.randomUUID(),
+      name: `Provider ${draft.providers.length + 1}`,
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: '',
+      defaultModel: 'gpt-4.1-mini'
+    }
+    setDraft((current) => ({ ...current, providers: [...current.providers, provider] }))
+    setSelectedProviderId(provider.id)
+    setShowKey(false)
+    setTestResult(null)
+  }
+
+  function removeProvider() {
+    if (!selectedProvider || selectedProvider.id === draft.defaultProviderId || referencedActions.length) return
+    if (!window.confirm(`确定删除 Provider“${selectedProvider.name}”吗？`)) return
+    const providers = draft.providers.filter((provider) => provider.id !== selectedProvider.id)
+    setDraft((current) => ({ ...current, providers }))
+    setSelectedProviderId(draft.defaultProviderId)
+    setShowKey(false)
+    setTestResult(null)
+  }
 
   async function test() {
+    if (!selectedProvider) return
     setTesting(true)
     setTestResult(null)
-    const result = await window.selectionAPI.testConnection(draft)
+    const result = await window.selectionAPI.testConnection(selectedProvider)
     setTestResult(result)
     setTesting(false)
   }
 
+  async function saveModelSettings() {
+    const error = await save({
+      providers: draft.providers,
+      defaultProviderId: draft.defaultProviderId,
+      targetLanguage: draft.targetLanguage,
+      maxInputCharacters: draft.maxInputCharacters
+    }, true)
+    if (error) setTestResult({ ok: false, message: error })
+  }
+
   return (
-    <SettingsPage title="模型" subtitle="连接 OpenAI 兼容的模型服务">
+    <SettingsPage title="模型" subtitle="管理 OpenAI 兼容 Provider 与默认请求参数">
       <section className="settings-section model-form">
-        <SectionTitle icon={Zap} title="API 配置" />
-        <label className="field-label">
-          <span>API 地址</span>
-          <input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} placeholder="https://api.openai.com/v1" />
-        </label>
-        <label className="field-label">
-          <span>API Key</span>
-          <div className="input-with-action">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={draft.apiKey}
-              onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
-              placeholder="sk-..."
-            />
-            <button className="icon-button" onClick={() => setShowKey(!showKey)} aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}>
-              {showKey ? <EyeOff size={17} /> : <Eye size={17} />}
-            </button>
+        <div className="section-title-row">
+          <SectionTitle icon={Zap} title="Provider 配置" />
+          <button className="secondary-button compact" type="button" onClick={addProvider}><Plus size={15} />新增 Provider</button>
+        </div>
+        <div className="provider-layout">
+          <div className="provider-list" role="tablist" aria-label="Provider 列表">
+            {draft.providers.map((provider) => (
+              <button
+                key={provider.id}
+                type="button"
+                role="tab"
+                aria-selected={provider.id === selectedProvider?.id}
+                className={provider.id === selectedProvider?.id ? 'active' : ''}
+                onClick={() => {
+                  setSelectedProviderId(provider.id)
+                  setShowKey(false)
+                  setTestResult(null)
+                }}>
+                <strong>{provider.name || '未命名 Provider'}</strong>
+                <span>{provider.defaultModel || '未设置模型'}</span>
+                {provider.id === draft.defaultProviderId && <em>默认</em>}
+              </button>
+            ))}
           </div>
-        </label>
+          {selectedProvider && (
+            <div className="provider-editor">
+              <div className="field-grid">
+                <label className="field-label">
+                  <span>名称</span>
+                  <input value={selectedProvider.name} onChange={(event) => updateProvider({ name: event.target.value })} maxLength={40} />
+                </label>
+                <label className="field-label">
+                  <span>默认模型</span>
+                  <input value={selectedProvider.defaultModel} onChange={(event) => updateProvider({ defaultModel: event.target.value })} placeholder="gpt-4.1-mini" />
+                </label>
+              </div>
+              <label className="field-label">
+                <span>API 地址</span>
+                <input value={selectedProvider.baseUrl} onChange={(event) => updateProvider({ baseUrl: event.target.value })} placeholder="https://api.openai.com/v1" />
+              </label>
+              <label className="field-label">
+                <span>API Key</span>
+                <div className="input-with-action">
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={selectedProvider.apiKey}
+                    onChange={(event) => updateProvider({ apiKey: event.target.value })}
+                    placeholder="sk-..."
+                  />
+                  <button className="icon-button" type="button" onClick={() => setShowKey(!showKey)} aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}>
+                    {showKey ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </div>
+              </label>
+              <div className="field-grid">
+                <label className="field-label">
+                  <span>默认温度（留空使用兼容默认）</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={selectedProvider.defaultTemperature ?? ''}
+                    onChange={(event) => updateProvider({ defaultTemperature: optionalNumber(event.target.value) })}
+                    placeholder="问答 0.4，其他 0.2"
+                  />
+                </label>
+                <label className="field-label">
+                  <span>默认最大输出（留空由服务决定）</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={MAX_OUTPUT_TOKENS}
+                    step={1}
+                    value={selectedProvider.defaultMaxOutputTokens ?? ''}
+                    onChange={(event) => updateProvider({ defaultMaxOutputTokens: optionalNumber(event.target.value) })}
+                    placeholder="服务默认"
+                  />
+                </label>
+              </div>
+              <div className="provider-editor-actions">
+                <div>
+                  {referencedActions.length > 0 && <span>{referencedActions.length} 个动作正在使用此 Provider</span>}
+                </div>
+                {selectedProvider.id !== draft.defaultProviderId && (
+                  <button className="secondary-button compact" type="button" onClick={() => setDraft({ ...draft, defaultProviderId: selectedProvider.id })}>设为默认</button>
+                )}
+                <button
+                  className="secondary-button compact danger-text"
+                  type="button"
+                  onClick={removeProvider}
+                  disabled={draft.providers.length <= 1 || selectedProvider.id === draft.defaultProviderId || referencedActions.length > 0}>
+                  <Trash2 size={14} />删除
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="settings-section model-form">
+        <SectionTitle icon={Languages} title="通用设置" />
         <div className="field-grid">
-          <label className="field-label">
-            <span>模型名称</span>
-            <input value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="gpt-4.1-mini" />
-          </label>
           <label className="field-label">
             <span>翻译目标语言</span>
             <input value={draft.targetLanguage} onChange={(event) => setDraft({ ...draft, targetLanguage: event.target.value })} placeholder="简体中文" />
           </label>
+          <label className="field-label">
+            <span>长文本提醒阈值（字符）</span>
+            <input
+              type="number"
+              min={1000}
+              max={200000}
+              step={1000}
+              value={draft.maxInputCharacters}
+              onChange={(event) => setDraft({ ...draft, maxInputCharacters: Number(event.target.value) })}
+            />
+          </label>
         </div>
-        <label className="field-label">
-          <span>长文本提醒阈值（字符）</span>
-          <input
-            type="number"
-            min={1000}
-            max={200000}
-            step={1000}
-            value={draft.maxInputCharacters}
-            onChange={(event) => setDraft({ ...draft, maxInputCharacters: Number(event.target.value) })}
-          />
-        </label>
         <div className="form-actions">
           <div className={`connection-result ${testResult?.ok ? 'success' : 'error'}`}>
             {testResult && <><span className="status-dot online" />{testResult.message}</>}
           </div>
-          <button className="secondary-button" onClick={() => void test()} disabled={testing}>
+          <button className="secondary-button" onClick={() => void test()} disabled={testing || !selectedProvider}>
             {testing ? <LoaderCircle className="spin" size={16} /> : <Activity size={16} />}
-            测试连接
+            测试当前 Provider
           </button>
           <button
             className="primary-button"
-            onClick={() => void save({
-              baseUrl: draft.baseUrl,
-              apiKey: draft.apiKey,
-              model: draft.model,
-              targetLanguage: draft.targetLanguage,
-              maxInputCharacters: draft.maxInputCharacters
-            }, true)}>
+            onClick={() => void saveModelSettings()}>
             {saved ? <Check size={16} /> : <Save size={16} />}
             {saved ? '已保存' : '保存'}
           </button>
@@ -323,6 +459,7 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
   const builtIns = useMemo(() => settings.actions.filter((action) => action.kind !== 'custom'), [settings.actions])
   const custom = useMemo(() => settings.actions.filter((action) => action.kind === 'custom'), [settings.actions])
   const pinnedCount = useMemo(() => settings.actions.filter((action) => action.pinned).length, [settings.actions])
+  const customPromptUnknown = getUnknownPromptVariables(prompt)
 
   function updateAction(id: string, patch: Partial<SelectionAction>) {
     void save((current) => ({
@@ -381,7 +518,7 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
   }
 
   function addAction() {
-    if (!label.trim() || !prompt.trim()) return
+    if (!label.trim() || !prompt.trim() || customPromptUnknown.length) return
     const action: SelectionAction = {
       id: `custom-${Date.now()}`,
       label: label.trim(),
@@ -446,7 +583,9 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
             <ActionRow
               key={action.id}
               action={action}
+              settings={settings}
               onToggle={(enabled) => updateAction(action.id, { enabled })}
+              onUpdate={(patch) => updateAction(action.id, patch)}
               onVariantToggle={(variantId, enabled) => updateVariant(action.id, variantId, enabled)}
               onPin={() => togglePinned(action)}
               pinDisabled={!action.pinned && pinnedCount >= MAX_PINNED_ACTIONS}
@@ -467,7 +606,8 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
           <div className="action-editor">
             <label className="field-label"><span>名称</span><input value={label} onChange={(event) => setLabel(event.target.value)} maxLength={20} /></label>
             <label className="field-label"><span>提示词</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} /></label>
-            <div className="form-actions"><button className="primary-button" onClick={addAction} disabled={!label.trim() || !prompt.trim()}><Check size={16} />添加</button></div>
+            <PromptHelp prompt={prompt} settings={settings} />
+            <div className="form-actions"><button className="primary-button" onClick={addAction} disabled={!label.trim() || !prompt.trim() || customPromptUnknown.length > 0}><Check size={16} />添加</button></div>
           </div>
         )}
         <div className="action-list">
@@ -476,7 +616,9 @@ function ActionSettings({ settings, save }: { settings: AppSettings; save: SaveS
             <ActionRow
               key={action.id}
               action={action}
+              settings={settings}
               onToggle={(enabled) => updateAction(action.id, { enabled })}
+              onUpdate={(patch) => updateAction(action.id, patch)}
               onPin={() => togglePinned(action)}
               pinDisabled={!action.pinned && pinnedCount >= MAX_PINNED_ACTIONS}
               onShortcutChange={(shortcut) => void updateShortcut(action.id, shortcut)}
@@ -652,7 +794,9 @@ function HistorySettings({ settings, save }: { settings: AppSettings; save: Save
 
 function ActionRow({
   action,
+  settings,
   onToggle,
+  onUpdate,
   onVariantToggle,
   onPin,
   pinDisabled,
@@ -662,7 +806,9 @@ function ActionRow({
   onDelete
 }: {
   action: SelectionAction
+  settings: AppSettings
   onToggle: (enabled: boolean) => void
+  onUpdate: (patch: Partial<SelectionAction>) => void
   onVariantToggle?: (variantId: string, enabled: boolean) => void
   onPin: () => void
   pinDisabled: boolean
@@ -671,6 +817,8 @@ function ActionRow({
   onMoveDown?: () => void
   onDelete?: () => void
 }) {
+  const [advanced, setAdvanced] = useState(false)
+
   return (
     <div className="action-group">
       <div className="action-row">
@@ -685,6 +833,15 @@ function ActionRow({
           </button>
         </div>
         <ShortcutInput action={action} onChange={onShortcutChange} />
+        <button
+          className={advanced ? 'icon-button pinned' : 'icon-button'}
+          type="button"
+          onClick={() => setAdvanced(!advanced)}
+          aria-expanded={advanced}
+          aria-label={`配置${action.label}的模型与提示词`}
+          title="模型与提示词">
+          {advanced ? <ChevronDown size={15} /> : <Settings2 size={15} />}
+        </button>
         <button
           className={action.pinned ? 'icon-button pinned' : 'icon-button'}
           onClick={onPin}
@@ -711,6 +868,141 @@ function ActionRow({
           ))}
         </div>
       )}
+      {advanced && <ActionAdvancedEditor action={action} settings={settings} onSave={onUpdate} />}
+    </div>
+  )
+}
+
+function ActionAdvancedEditor({
+  action,
+  settings,
+  onSave
+}: {
+  action: SelectionAction
+  settings: AppSettings
+  onSave: (patch: Partial<SelectionAction>) => void
+}) {
+  const [providerId, setProviderId] = useState(action.requestProfile?.providerId ?? '')
+  const [model, setModel] = useState(action.requestProfile?.model ?? '')
+  const [temperature, setTemperature] = useState<number | undefined>(action.requestProfile?.temperature)
+  const [maxOutputTokens, setMaxOutputTokens] = useState<number | undefined>(action.requestProfile?.maxOutputTokens)
+  const [prompt, setPrompt] = useState(action.prompt ?? '')
+
+  useEffect(() => {
+    setProviderId(action.requestProfile?.providerId ?? '')
+    setModel(action.requestProfile?.model ?? '')
+    setTemperature(action.requestProfile?.temperature)
+    setMaxOutputTokens(action.requestProfile?.maxOutputTokens)
+    setPrompt(action.prompt ?? '')
+  }, [action])
+
+  const requestProfile: ActionRequestProfile = {
+    ...(providerId ? { providerId } : {}),
+    ...(model.trim() ? { model: model.trim() } : {}),
+    ...(temperature === undefined ? {} : { temperature }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens })
+  }
+  const draftAction: SelectionAction = {
+    ...action,
+    ...(prompt.trim() ? { prompt: prompt.trim() } : { prompt: undefined }),
+    ...(Object.keys(requestProfile).length ? { requestProfile } : { requestProfile: undefined })
+  }
+  const unknownVariables = getUnknownPromptVariables(prompt)
+  let profileSummary = ''
+  let profileError = ''
+  try {
+    const profile = resolveRequestProfile(settings, draftAction)
+    profileSummary = `${profile.providerName} · ${profile.model} · 温度 ${profile.temperature} · 最大输出 ${profile.maxOutputTokens ?? '服务默认'}`
+  } catch (error) {
+    profileError = readableError(error)
+  }
+
+  function saveAdvanced() {
+    if (unknownVariables.length || profileError) return
+    onSave({
+      prompt: prompt.trim() || undefined,
+      requestProfile: Object.keys(requestProfile).length ? requestProfile : undefined
+    })
+  }
+
+  return (
+    <div className="action-advanced">
+      <div className="action-advanced-header">
+        <strong>模型与提示词</strong>
+        <span>留空即继承 Provider 默认配置</span>
+      </div>
+      <div className="field-grid">
+        <label className="field-label">
+          <span>Provider</span>
+          <select value={providerId} onChange={(event) => setProviderId(event.target.value)}>
+            <option value="">继承默认 Provider</option>
+            {settings.providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+          </select>
+        </label>
+        <label className="field-label">
+          <span>模型覆盖</span>
+          <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="继承 Provider 默认模型" />
+        </label>
+      </div>
+      <div className="field-grid">
+        <label className="field-label">
+          <span>温度覆盖</span>
+          <input
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            value={temperature ?? ''}
+            onChange={(event) => setTemperature(optionalNumber(event.target.value))}
+            placeholder="继承"
+          />
+        </label>
+        <label className="field-label">
+          <span>最大输出覆盖</span>
+          <input
+            type="number"
+            min={1}
+            max={MAX_OUTPUT_TOKENS}
+            step={1}
+            value={maxOutputTokens ?? ''}
+            onChange={(event) => setMaxOutputTokens(optionalNumber(event.target.value))}
+            placeholder="继承"
+          />
+        </label>
+      </div>
+      <label className="field-label">
+        <span>{action.variants?.length ? '附加提示词（与二级动作要求组合）' : '提示词'}</span>
+        <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} maxLength={2000} />
+      </label>
+      <PromptHelp prompt={prompt} settings={settings} />
+      <div className="action-effective-profile">{profileError || profileSummary}</div>
+      <div className="form-actions">
+        <button className="secondary-button compact" type="button" onClick={saveAdvanced} disabled={unknownVariables.length > 0 || Boolean(profileError)}>
+          <Save size={15} />保存高级配置
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PromptHelp({ prompt, settings }: { prompt: string; settings: AppSettings }) {
+  const unknownVariables = getUnknownPromptVariables(prompt)
+  const preview = prompt
+    ? renderPromptTemplate(prompt, {
+        text: '示例选中文本',
+        language: settings.targetLanguage,
+        program: '示例应用.exe',
+        question: '请进一步说明。'
+      })
+    : ''
+
+  return (
+    <div className="prompt-help">
+      <span>变量：{'{text}'}、{'{language}'}、{'{program}'}、{'{question}'}；使用 {'{{text}}'} 输出字面量。</span>
+      {unknownVariables.length > 0 && (
+        <strong role="alert">未知提示词变量：{unknownVariables.map((name) => `{${name}}`).join('、')}</strong>
+      )}
+      {preview && <pre>{preview}</pre>}
     </div>
   )
 }
@@ -859,4 +1151,10 @@ function formatSessionTime(value: string): string {
     hour: '2-digit',
     minute: '2-digit'
   }).format(date)
+}
+
+function optionalNumber(value: string): number | undefined {
+  if (!value.trim()) return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
 }
