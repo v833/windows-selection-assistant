@@ -7,6 +7,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  nativeTheme,
   safeStorage,
   screen,
   shell,
@@ -65,6 +66,29 @@ let ignoreResultBoundsTimer: NodeJS.Timeout | null = null
 const requests = new Map<string, AbortController>()
 
 const preloadPath = join(__dirname, '../preload/index.js')
+const titleBarHeight = 44
+
+function nativeWindowColors(): { background: string; surface: string; symbols: string } {
+  return nativeTheme.shouldUseDarkColors
+    ? { background: '#1b1f27', surface: '#20252e', symbols: '#eef1f6' }
+    : { background: '#f5f7fa', surface: '#fbfcfd', symbols: '#2b3340' }
+}
+
+function updateNativeWindowColors(): void {
+  const colors = nativeWindowColors()
+  mainWindow?.setBackgroundColor(colors.background)
+  mainWindow?.setTitleBarOverlay({
+    color: colors.background,
+    symbolColor: colors.symbols,
+    height: titleBarHeight
+  })
+  resultWindow?.setBackgroundColor(colors.surface)
+}
+
+function applyNativeTheme(theme: AppSettings['theme']): void {
+  nativeTheme.themeSource = theme
+  updateNativeWindowColors()
+}
 
 function loadRenderer(window: BrowserWindow, view: 'main' | 'toolbar' | 'result'): void {
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -77,6 +101,7 @@ function loadRenderer(window: BrowserWindow, view: 'main' | 'toolbar' | 'result'
 }
 
 function createMainWindow(): BrowserWindow {
+  const colors = nativeWindowColors()
   const window = new BrowserWindow({
     width: 960,
     height: 680,
@@ -84,12 +109,12 @@ function createMainWindow(): BrowserWindow {
     minHeight: 580,
     show: false,
     title: '划词助手',
-    backgroundColor: '#f5f6f4',
+    backgroundColor: colors.background,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#f5f6f4',
-      symbolColor: '#262a28',
-      height: 44
+      color: colors.background,
+      symbolColor: colors.symbols,
+      height: titleBarHeight
     },
     webPreferences: {
       preload: preloadPath,
@@ -141,6 +166,7 @@ function createToolbarWindow(): BrowserWindow {
 function createResultWindow(): BrowserWindow {
   const storedBounds = settingsStore.get().resultWindowBounds
   const initialBounds = storedBounds ? fitResultWindowBounds(storedBounds) : { width: 560, height: 600 }
+  const colors = nativeWindowColors()
   resultWindowHasCustomBounds = Boolean(storedBounds)
   const window = new BrowserWindow({
     ...initialBounds,
@@ -148,7 +174,7 @@ function createResultWindow(): BrowserWindow {
     minHeight: 360,
     show: false,
     frame: false,
-    backgroundColor: '#f8f9f7',
+    backgroundColor: colors.surface,
     alwaysOnTop: true,
     resizable: true,
     hasShadow: true,
@@ -538,6 +564,7 @@ function registerIpc(): void {
     if (settings.historyRetentionLimit !== before.historyRetentionLimit) {
       sessionStore.enforceRetention(settings.historyRetentionLimit)
     }
+    if (settings.theme !== before.theme) applyNativeTheme(settings.theme)
     sendSelection()
     rebuildTrayMenu()
     return settings
@@ -661,6 +688,9 @@ app.on('second-instance', () => showMainWindow())
 
 app.whenReady().then(() => {
   settingsStore = new SettingsStore()
+  const initialSettings = settingsStore.get()
+  applyNativeTheme(initialSettings.theme)
+  nativeTheme.on('updated', updateNativeWindowColors)
   sessionStore = new SessionStore(join(app.getPath('userData'), 'sessions.json'), {
     encrypt: (value) => {
       if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows 安全存储不可用，无法保存会话历史')
@@ -685,9 +715,9 @@ app.whenReady().then(() => {
   createTray()
   reportShortcutErrors(shortcutErrors)
   mainWindow = createMainWindow()
-  const settings = settingsStore.get()
-  app.setLoginItemSettings({ openAtLogin: settings.launchAtLogin })
-  selectionService.setEnabled(settings.enabled)
+  updateNativeWindowColors()
+  app.setLoginItemSettings({ openAtLogin: initialSettings.launchAtLogin })
+  selectionService.setEnabled(initialSettings.enabled)
 })
 
 app.on('before-quit', () => {
