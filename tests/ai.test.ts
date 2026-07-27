@@ -14,9 +14,14 @@ const streamSettings = {
   enabled: true,
   launchAtLogin: false,
   theme: 'system',
-  baseUrl: 'https://example.com/v1',
-  apiKey: '',
-  model: 'test-model',
+  providers: [{
+    id: 'default-provider',
+    name: '默认 Provider',
+    baseUrl: 'https://example.com/v1',
+    apiKey: '',
+    defaultModel: 'test-model'
+  }],
+  defaultProviderId: 'default-provider',
   targetLanguage: '简体中文',
   autoDictionary: false,
   jsonExtractionSchema: '',
@@ -78,6 +83,37 @@ describe('AI request helpers', () => {
 
     expect(messages[1].content).toContain('检查错别字并说明原因')
     expect(messages[1].content).toContain('这是一断需要修改的文字。')
+  })
+
+  it('renders prompt variables without appending selected text twice', () => {
+    const messages = buildMessages(
+      {
+        id: 'custom',
+        label: '变量动作',
+        kind: 'custom',
+        enabled: true,
+        prompt: '在 {program} 中把 {text} 翻译为 {language}。问题：{question}'
+      },
+      'Hello',
+      '日语',
+      [{ role: 'user', content: '保留语气吗？' }],
+      false,
+      '',
+      'Mail.exe'
+    )
+
+    expect(messages[1].content).toBe('在 Mail.exe 中把 Hello 翻译为 日语。问题：保留语气吗？')
+    expect(messages[1].content.match(/Hello/g)).toHaveLength(1)
+  })
+
+  it('keeps escaped prompt variables as literal text', () => {
+    const messages = buildMessages(
+      { id: 'custom', label: '转义', kind: 'custom', enabled: true, prompt: '输出 {{text}}，处理 {text}' },
+      '原文',
+      '简体中文'
+    )
+
+    expect(messages[1].content).toBe('输出 {text}，处理 原文')
   })
 
   it('routes short explanations to dictionary mode only when enabled', () => {
@@ -240,5 +276,45 @@ describe('AI request helpers', () => {
       status: 500,
       detail: 'x'.repeat(600)
     })
+  })
+
+  it('uses the action provider and request overrides', async () => {
+    const fetchMock = vi.fn(async () => new Response('data: [DONE]\n', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const action: SelectionAction = {
+      id: 'code',
+      label: '代码',
+      kind: 'code',
+      enabled: true,
+      requestProfile: {
+        providerId: 'strong-provider',
+        model: 'strong-model',
+        temperature: 0.7,
+        maxOutputTokens: 2048
+      }
+    }
+    const settings: AppSettings = {
+      ...streamSettings,
+      providers: [
+        ...streamSettings.providers,
+        {
+          id: 'strong-provider',
+          name: '强模型',
+          baseUrl: 'https://strong.example/v1',
+          apiKey: 'secret-key',
+          defaultModel: 'provider-model'
+        }
+      ],
+      actions: [action]
+    }
+
+    await streamCompletion(settings, action, 'const answer = 42', new AbortController().signal, () => undefined)
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    const body = JSON.parse(String(init.body))
+    expect(url).toBe('https://strong.example/v1/chat/completions')
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer secret-key')
+    expect(body).toMatchObject({ model: 'strong-model', temperature: 0.7, max_tokens: 2048 })
+    expect(String(init.body)).not.toContain('secret-key')
   })
 })

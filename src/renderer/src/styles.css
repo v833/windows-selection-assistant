@@ -60,12 +60,12 @@
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; min-height: 100%; margin: 0; }
 body { color: var(--ink); background: transparent; font-size: 14px; }
-button, input, textarea { font: inherit; letter-spacing: 0; }
+button, input, select, textarea { font: inherit; letter-spacing: 0; }
 button { color: inherit; border: 0; cursor: pointer; }
 button:disabled { cursor: default; opacity: 0.5; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-input, textarea { color: var(--ink); background: var(--surface); border: 1px solid var(--line); outline: 0; }
-input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+input, select, textarea { color: var(--ink); background: var(--surface); border: 1px solid var(--line); outline: 0; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .boot-screen { min-height: 100vh; display: grid; place-items: center; color: var(--accent); background: var(--bg); }
 .spin { animation: spin 0.8s linear infinite; }
@@ -117,7 +117,7 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .model-form .section-title { margin-bottom: 22px; }
 .field-label { display: block; margin-bottom: 16px; }
 .field-label > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 12px; font-weight: 600; }
-.field-label input, .field-label textarea { width: 100%; min-height: 38px; padding: 0 11px; border-radius: 7px; font-size: 13px; }
+.field-label input, .field-label select, .field-label textarea { width: 100%; min-height: 38px; padding: 0 11px; border-radius: 7px; font-size: 13px; }
 .field-label textarea { min-height: 96px; padding: 10px 11px; resize: vertical; line-height: 1.55; }
 .input-with-action { position: relative; }
 .input-with-action input { padding-right: 42px; }
@@ -128,6 +128,18 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .connection-result.success { color: var(--accent); }
 .connection-result.error { color: var(--danger); }
 .connection-result .status-dot { margin: 0 7px 1px 0; vertical-align: middle; }
+.provider-layout { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 18px; }
+.provider-list { display: grid; align-content: start; gap: 6px; }
+.provider-list button { position: relative; min-height: 58px; padding: 10px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; }
+.provider-list button:hover { border-color: var(--accent); }
+.provider-list button.active { border-color: var(--accent); background: var(--accent-soft); }
+.provider-list strong, .provider-list span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-list strong { padding-right: 34px; font-size: 12px; }
+.provider-list span { margin-top: 5px; color: var(--muted); font-size: 10px; }
+.provider-list em { position: absolute; top: 8px; right: 7px; padding: 2px 5px; border-radius: 4px; color: var(--accent-deep); background: var(--accent-soft); font-size: 9px; font-style: normal; }
+.provider-editor { min-width: 0; padding: 15px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.provider-editor-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.provider-editor-actions > div { min-width: 0; flex: 1; color: var(--warning); font-size: 10px; }
 .primary-button, .secondary-button { height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border-radius: 7px; font-size: 12px; font-weight: 650; }
 .primary-button { color: #fff; background: var(--accent); }
 .primary-button:hover { background: var(--accent-deep); }
@@ -163,6 +175,16 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .action-variant-row { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
 .action-variant-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .action-variant-row .switch { transform: scale(0.82); transform-origin: right center; }
+.action-advanced { margin: 0 0 14px 41px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); }
+.action-advanced-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.action-advanced-header strong { font-size: 12px; }
+.action-advanced-header span { color: var(--muted); font-size: 10px; }
+.action-advanced .field-label { margin-bottom: 12px; }
+.action-advanced .form-actions { min-height: 30px; margin-top: 10px; }
+.action-effective-profile { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.prompt-help { display: grid; gap: 7px; margin-top: -5px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.prompt-help strong { color: var(--danger); font-weight: 650; }
+.prompt-help pre { max-height: 116px; overflow: auto; margin: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--surface); font-family: Consolas, "Cascadia Code", monospace; font-size: 10px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .empty-row { padding: 18px 0; color: var(--subtle); font-size: 12px; text-align: center; }
 .action-editor { padding: 16px 0 4px; }
 .action-editor .form-actions { margin-top: 8px; }
@@ -296,4 +318,5 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
   .sidebar { width: 180px; flex-basis: 180px; }
   .settings-main { padding-inline: 28px; }
   .theme-grid { grid-template-columns: 1fr; }
+  .provider-layout { grid-template-columns: 1fr; }
 }

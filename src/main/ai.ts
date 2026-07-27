@@ -1,7 +1,9 @@
-import type { AIConversationMessage, AppSettings, SelectionAction } from '../shared/types'
 import { isDictionaryCandidate } from '../shared/actions'
 import { classifyAIError } from '../shared/aiErrors'
+import { hasPromptVariable, renderPromptTemplate } from '../shared/promptVariables'
+import { resolveRequestProfile } from '../shared/providers'
 import { trimConversationForRequest } from '../shared/textLimits'
+import type { AIConversationMessage, AppSettings, ProviderProfile, SelectionAction } from '../shared/types'
 
 export function buildChatCompletionsUrl(baseUrl: string): string {
   const normalized = baseUrl.trim().replace(/\/+$/, '')
@@ -15,7 +17,8 @@ export function buildMessages(
   targetLanguage: string,
   conversation: AIConversationMessage[] = [],
   autoDictionary = false,
-  jsonExtractionSchema = ''
+  jsonExtractionSchema = '',
+  programName = ''
 ) {
   const systemPrompts: Record<Exclude<SelectionAction['kind'], 'custom'>, string> = {
     chat: '你是严谨、清晰的对话助手。围绕用户选中的文本回答后续问题；需要补充常识时应明确区分文本内容与补充信息。',
@@ -29,19 +32,37 @@ export function buildMessages(
     code: '你是资深软件工程师。保持代码行为和技术准确性，明确说明不确定或无法等价转换的部分。'
   }
   const history = trimConversationForRequest(conversation).messages
+  const question = [...history].reverse().find((message) => message.role === 'user')?.content ?? ''
+  const promptTemplate = action.prompt?.trim() ?? ''
+  const renderedPrompt = renderPromptTemplate(promptTemplate, {
+    text: selectedText,
+    language: targetLanguage,
+    program: programName,
+    question
+  })
+  const promptContainsText = hasPromptVariable(promptTemplate, 'text')
 
   if (action.kind === 'chat') {
+    const systemPrompt = renderedPrompt
+      ? `${systemPrompts.chat}\n\n处理要求：\n${renderedPrompt}`
+      : systemPrompts.chat
     return [
-      { role: 'system' as const, content: systemPrompts.chat },
-      { role: 'user' as const, content: `用户选中的上下文：\n\n${selectedText}` },
+      { role: 'system' as const, content: systemPrompt },
+      ...(!promptContainsText
+        ? [{ role: 'user' as const, content: `用户选中的上下文：\n\n${selectedText}` }]
+        : []),
       ...history
     ]
   }
 
   const baseUserContent = action.kind === 'custom'
-    ? `${action.prompt ?? ''}\n\n待处理文本：\n${selectedText}`
-    : action.prompt?.trim()
-      ? `处理要求：\n${action.prompt.trim()}\n\n待处理文本：\n${selectedText}`
+    ? promptContainsText
+      ? renderedPrompt
+      : `${renderedPrompt}\n\n待处理文本：\n${selectedText}`
+    : renderedPrompt
+      ? promptContainsText
+        ? `处理要求：\n${renderedPrompt}`
+        : `处理要求：\n${renderedPrompt}\n\n待处理文本：\n${selectedText}`
       : selectedText
   const userContent = action.id === 'extract:json' && jsonExtractionSchema.trim()
     ? `${baseUserContent}\n\nJSON 字段或 Schema 要求：\n${jsonExtractionSchema.trim()}`
@@ -80,29 +101,31 @@ export async function streamCompletion(
   selectedText: string,
   signal: AbortSignal,
   onDelta: (content: string) => void,
-  conversation: AIConversationMessage[] = []
+  conversation: AIConversationMessage[] = [],
+  programName = ''
 ): Promise<void> {
-  if (!settings.baseUrl.trim()) throw new Error('请先填写 API 地址')
-  if (!settings.model.trim()) throw new Error('请先填写模型名称')
+  const profile = resolveRequestProfile(settings, action)
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`
+  if (profile.apiKey) headers.Authorization = `Bearer ${profile.apiKey}`
 
-  const response = await fetchWithTimeout(buildChatCompletionsUrl(settings.baseUrl), {
+  const response = await fetchWithTimeout(buildChatCompletionsUrl(profile.baseUrl), {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: settings.model.trim(),
+      model: profile.model,
       messages: buildMessages(
         action,
         selectedText,
         settings.targetLanguage,
         conversation,
         settings.autoDictionary,
-        settings.jsonExtractionSchema
+        settings.jsonExtractionSchema,
+        programName
       ),
       stream: true,
-      temperature: action.kind === 'chat' ? 0.4 : 0.2
+      temperature: profile.temperature,
+      ...(profile.maxOutputTokens === undefined ? {} : { max_tokens: profile.maxOutputTokens })
     }),
     signal
   })
@@ -137,20 +160,20 @@ export async function streamCompletion(
   }
 }
 
-export async function testConnection(settings: Pick<AppSettings, 'baseUrl' | 'apiKey' | 'model'>) {
-  if (!settings.baseUrl.trim() || !settings.model.trim()) {
+export async function testConnection(provider: ProviderProfile) {
+  if (!provider.baseUrl.trim() || !provider.defaultModel.trim()) {
     return { ok: false, message: '请填写 API 地址和模型名称' }
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`
+  if (provider.apiKey.trim()) headers.Authorization = `Bearer ${provider.apiKey.trim()}`
 
   try {
-    const response = await fetchWithTimeout(buildChatCompletionsUrl(settings.baseUrl), {
+    const response = await fetchWithTimeout(buildChatCompletionsUrl(provider.baseUrl), {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        model: settings.model.trim(),
+        model: provider.defaultModel.trim(),
         messages: [{ role: 'user', content: 'Hi' }],
         stream: false,
         max_tokens: 1
