@@ -227,8 +227,7 @@ function showAction(actionId: string, variantId?: string): void {
       const menu = Menu.buildFromTemplate(
         variants.map((variant) => ({ label: variant.label, click: () => showAction(action.id, variant.id) }))
       )
-      if (toolbarWindow && !toolbarWindow.isDestroyed()) menu.popup({ window: toolbarWindow })
-      else menu.popup()
+      popupActionMenu(menu)
       return
     }
   }
@@ -385,8 +384,21 @@ function showMoreActions(): void {
   }
   template.push(...overflow.map(actionMenuItem))
   const menu = Menu.buildFromTemplate(template)
-  if (toolbarWindow && !toolbarWindow.isDestroyed()) menu.popup({ window: toolbarWindow })
-  else menu.popup()
+  popupActionMenu(menu)
+}
+
+function popupActionMenu(menu: Menu): void {
+  const window = toolbarWindow && !toolbarWindow.isDestroyed() ? toolbarWindow : undefined
+  selectionService.setMenuOpen(true)
+  try {
+    menu.popup({
+      ...(window ? { window } : {}),
+      callback: () => selectionService.setMenuOpen(false)
+    })
+  } catch (error) {
+    selectionService.setMenuOpen(false)
+    throw error
+  }
 }
 
 function applyActionShortcuts(actions: SelectionAction[]): string | null {

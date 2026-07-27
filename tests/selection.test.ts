@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BrowserWindow } from 'electron'
 import type { TextSelectionData } from 'selection-hook'
 
 const hookState = vi.hoisted(() => ({
-  selection: null as TextSelectionData | null
+  selection: null as TextSelectionData | null,
+  handlers: {} as Record<string, (...args: unknown[]) => void>
 }))
 
 vi.mock('electron', () => ({
@@ -18,8 +20,14 @@ vi.mock('selection-hook', () => {
     static FilterMode = { EXCLUDE_LIST: 2 }
     static INVALID_COORDINATE = -99999
 
-    on(): this { return this }
-    off(): this { return this }
+    on(event: string, handler: (...args: unknown[]) => void): this {
+      hookState.handlers[event] = handler
+      return this
+    }
+    off(event: string): this {
+      delete hookState.handlers[event]
+      return this
+    }
     start(): boolean { return true }
     stop(): void {}
     cleanup(): void {}
@@ -50,6 +58,7 @@ function selection(text: string): TextSelectionData {
 describe('current selection lookup', () => {
   beforeEach(() => {
     hookState.selection = null
+    hookState.handlers = {}
   })
 
   it('returns null instead of falling back to a previous selection', () => {
@@ -61,6 +70,31 @@ describe('current selection lookup', () => {
 
     hookState.selection = null
     expect(service.getCurrentSelection()).toBeNull()
+    service.cleanup()
+  })
+
+  it('does not hide the toolbar while a native action menu is open', () => {
+    const hide = vi.fn()
+    const window = {
+      isVisible: () => true,
+      isFocused: () => false,
+      getBounds: () => ({ x: 0, y: 0, width: 80, height: 40 }),
+      hide
+    } as unknown as BrowserWindow
+    const service = new SelectionService(() => window, vi.fn(), vi.fn())
+    service.setEnabled(true)
+    service.setMenuOpen(true)
+
+    hookState.handlers['mouse-down']?.({ x: 200, y: 200 })
+    hookState.handlers['mouse-wheel']?.()
+    hookState.handlers['key-down']?.()
+
+    expect(hide).not.toHaveBeenCalled()
+
+    service.setMenuOpen(false)
+    hookState.handlers['mouse-down']?.({ x: 200, y: 200 })
+
+    expect(hide).toHaveBeenCalledOnce()
     service.cleanup()
   })
 })
