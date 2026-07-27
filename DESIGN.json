@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-27T00:00:00+08:00",
+  "title": "Design System: 划词助手",
+  "extensions": {
+    "colorMeta": {
+      "canvas": {
+        "role": "neutral",
+        "displayName": "冷雾背景",
+        "canonical": "oklch(97.5% 0.006 255)",
+        "tonalRamp": ["oklch(18% 0.006 255)", "oklch(28% 0.006 255)", "oklch(40% 0.006 255)", "oklch(52% 0.006 255)", "oklch(64% 0.006 255)", "oklch(76% 0.006 255)", "oklch(88% 0.006 255)", "oklch(97.5% 0.006 255)"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "纸面白",
+        "canonical": "oklch(99% 0.004 255)",
+        "tonalRamp": ["oklch(20% 0.004 255)", "oklch(31% 0.004 255)", "oklch(42% 0.004 255)", "oklch(54% 0.004 255)", "oklch(66% 0.004 255)", "oklch(78% 0.004 255)", "oklch(90% 0.004 255)", "oklch(99% 0.004 255)"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "墨色文字",
+        "canonical": "oklch(24% 0.02 255)",
+        "tonalRamp": ["oklch(15% 0.02 255)", "oklch(24% 0.02 255)", "oklch(36% 0.02 255)", "oklch(48% 0.02 255)", "oklch(60% 0.02 255)", "oklch(72% 0.02 255)", "oklch(84% 0.02 255)", "oklch(95% 0.02 255)"]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "工作蓝",
+        "canonical": "oklch(57% 0.17 255)",
+        "tonalRamp": ["oklch(18% 0.08 255)", "oklch(28% 0.11 255)", "oklch(39% 0.14 255)", "oklch(50% 0.17 255)", "oklch(61% 0.16 255)", "oklch(72% 0.13 255)", "oklch(84% 0.08 255)", "oklch(95% 0.03 255)"]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "克制红",
+        "canonical": "oklch(56% 0.18 25)",
+        "tonalRamp": ["oklch(18% 0.08 25)", "oklch(29% 0.11 25)", "oklch(40% 0.14 25)", "oklch(51% 0.18 25)", "oklch(62% 0.16 25)", "oklch(73% 0.12 25)", "oklch(84% 0.07 25)", "oklch(95% 0.025 25)"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "页面标题", "purpose": "设置页一级标题" },
+      "title": { "displayName": "界面标题", "purpose": "窗口、区块和设置名称" },
+      "body": { "displayName": "阅读正文", "purpose": "回答、正文和说明" },
+      "label": { "displayName": "控件标签", "purpose": "按钮、导航和字段标签" }
+    },
+    "shadows": [
+      { "name": "floating-tool", "value": "0 10px 28px rgba(28, 39, 58, 0.16), 0 2px 8px rgba(28, 39, 58, 0.08)", "purpose": "划词工具栏" },
+      { "name": "result-window", "value": "0 18px 48px rgba(28, 39, 58, 0.18), 0 4px 14px rgba(28, 39, 58, 0.08)", "purpose": "结果窗口" }
+    ],
+    "motion": [
+      { "name": "fast", "value": "120ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "按钮和悬停反馈" },
+      { "name": "standard", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "面板与内容状态变化" }
+    ],
+    "breakpoints": [
+      { "name": "compact-settings", "value": "760px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "保存和发送等单一主要操作。",
+      "html": "<button class='ds-button-primary'>保存</button>",
+      "css": ".ds-button-primary { height: 36px; padding: 0 14px; border: 0; border-radius: 6px; color: oklch(99% 0.004 255); background: oklch(57% 0.17 255); font: 600 12px 'Segoe UI Variable', sans-serif; transition: background 120ms cubic-bezier(0.22,1,0.36,1); } .ds-button-primary:hover { background: oklch(51% 0.17 255); } .ds-button-primary:focus-visible { outline: 2px solid oklch(57% 0.17 255); outline-offset: 2px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "测试、刷新和次要命令。",
+      "html": "<button class='ds-button-secondary'>测试连接</button>",
+      "css": ".ds-button-secondary { height: 36px; padding: 0 12px; border: 0; border-radius: 6px; color: oklch(24% 0.02 255); background: oklch(95.5% 0.009 255); font: 600 12px 'Segoe UI Variable', sans-serif; } .ds-button-secondary:hover { background: oklch(92% 0.012 255); } .ds-button-secondary:focus-visible { outline: 2px solid oklch(57% 0.17 255); outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "设置与会话输入。",
+      "html": "<input class='ds-input' value='gpt-4.1-mini' aria-label='模型名称'>",
+      "css": ".ds-input { height: 40px; padding: 0 12px; border: 1px solid oklch(89% 0.012 255); border-radius: 6px; color: oklch(24% 0.02 255); background: oklch(99% 0.004 255); font: 400 13px 'Segoe UI Variable', sans-serif; } .ds-input:focus { border-color: oklch(57% 0.17 255); outline: 3px solid oklch(94% 0.04 255); }"
+    },
+    {
+      "name": "Side Navigation",
+      "kind": "nav",
+      "description": "设置页稳定导航。",
+      "html": "<button class='ds-nav-active'>快捷动作</button>",
+      "css": ".ds-nav-active { height: 38px; padding: 0 10px; border: 0; border-radius: 6px; color: oklch(49% 0.17 255); background: oklch(94% 0.04 255); font: 600 12px 'Segoe UI Variable', sans-serif; } .ds-nav-active:focus-visible { outline: 2px solid oklch(57% 0.17 255); outline-offset: 2px; }"
+    },
+    {
+      "name": "Selection Toolbar Button",
+      "kind": "custom",
+      "description": "划词工具栏中的紧凑图标按钮。",
+      "html": "<button class='ds-toolbar-button' aria-label='翻译'><svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='m5 8 6 6'></path><path d='m4 14 6-6 2-3'></path><path d='M2 5h12'></path><path d='M7 2h1'></path><path d='m22 22-5-10-5 10'></path><path d='M14 18h6'></path></svg></button>",
+      "css": ".ds-toolbar-button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 7px; color: oklch(49% 0.018 255); background: transparent; transition: color 120ms cubic-bezier(0.22,1,0.36,1), background 120ms cubic-bezier(0.22,1,0.36,1); } .ds-toolbar-button:hover { color: oklch(51% 0.17 255); background: oklch(94% 0.04 255); } .ds-toolbar-button:focus-visible { outline: 2px solid oklch(57% 0.17 255); outline-offset: 1px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "安静的桌面工具",
+    "overview": "划词助手服务于已经进行中的阅读和写作任务。界面出现时清楚，使用时直接，完成后退回背景。层级来自排版、留白与色调，边框和阴影只在必要时出现。",
+    "keyCharacteristics": ["冷静、紧凑、可信赖", "单一强调色", "主要内容优先", "标准 Windows 交互"],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "强调蓝只表达可操作、已选择或正在进行的状态。", "section": "colors" },
+      { "name": "The Reading First Rule", "body": "结果回答的字号和行高始终高于周围元信息。", "section": "typography" },
+      { "name": "The Flat by Default Rule", "body": "不离开文档流的区域不得通过阴影表达重要性。", "section": "elevation" }
+    ],
+    "dos": ["使用排版、留白和色调建立层级", "为完整交互状态提供一致反馈", "验证不同主题和 Windows 缩放"],
+    "donts": ["使用渐变、霓虹、玻璃拟态或大面积高饱和颜色", "使用大量卡片、边框和阴影", "使用纯黑或纯白", "重新发明标准 Windows 控件"]
+  }
+}
