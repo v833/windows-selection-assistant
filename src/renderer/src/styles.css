@@ -56,6 +56,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .setting-row strong, .setting-row span { display: block; }
 .setting-row strong { font-size: 13px; font-weight: 650; }
 .setting-row div span { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.setting-select { min-width: 112px; height: 34px; padding: 0 9px; border-radius: var(--radius-sm); font-size: 12px; }
 .setting-row code { max-width: 320px; padding: 4px 7px; overflow: hidden; border-radius: 5px; color: var(--muted); background: var(--surface-soft); font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .switch { position: relative; width: 38px; height: 22px; flex: 0 0 38px; padding: 2px; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--surface-strong); }
 .switch span { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 3px rgba(28, 39, 58, 0.18); transition: transform 160ms var(--ease-out); }
@@ -218,6 +219,15 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .markdown-content { min-width: 0; }
 .markdown-content > :first-child { margin-top: 0; }
 .markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content > h1, .markdown-content > h2, .markdown-content > h3, .markdown-content > h4, .markdown-content > p { position: relative; }
+.markdown-content > .speech-button { margin: -7px 0 13px; }
+.speech-button { position: relative; width: 26px; height: 26px; display: inline-grid; place-items: center; flex: 0 0 26px; border-radius: 6px; color: var(--subtle); vertical-align: middle; }
+.speech-button:hover, .speech-button:focus-visible { color: var(--accent-hover); background: var(--accent-soft); }
+.speech-button.error { color: var(--danger); background: var(--danger-soft); }
+.speech-button .speech-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+.source-speech-button { margin-left: 2px; }
+.source-header > div { justify-content: flex-end; }
+.markdown-content > h1 + .speech-button, .markdown-content > h2 + .speech-button, .markdown-content > h3 + .speech-button, .markdown-content > h4 + .speech-button { margin: -4px 0 8px; }
 .markdown-content p, .markdown-content ul, .markdown-content ol, .markdown-content blockquote, .markdown-content pre, .markdown-content table { margin: 0 0 13px; }
 .markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content h4 { margin: 21px 0 9px; line-height: 1.35; font-weight: 650; }
 .markdown-content h1 { font-size: 21px; }

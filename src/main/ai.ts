@@ -20,7 +20,9 @@ export function buildMessages(
   jsonExtractionSchema = '',
   programName = ''
 ) {
-  const systemPrompts: Record<Exclude<SelectionAction['kind'], 'custom'>, string> = {
+  if (action.kind === 'speak') throw new Error('本地朗读动作不调用模型服务')
+
+  const systemPrompts: Record<Exclude<SelectionAction['kind'], 'custom' | 'speak'>, string> = {
     chat: '你是严谨、清晰的对话助手。围绕用户选中的文本回答后续问题；需要补充常识时应明确区分文本内容与补充信息。',
     translate: `你是专业翻译。将用户提供的文本翻译为${targetLanguage}，保留原有段落和格式，并严格遵循用户给出的处理要求。`,
     explain: '你是清晰、准确的知识助手。解释用户提供的文本，必要时补充关键背景，但不要臆测。',
@@ -104,6 +106,7 @@ export async function streamCompletion(
   conversation: AIConversationMessage[] = [],
   programName = ''
 ): Promise<void> {
+  if (action.kind === 'speak') throw new Error('本地朗读动作不调用模型服务')
   const profile = resolveRequestProfile(settings, action)
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }

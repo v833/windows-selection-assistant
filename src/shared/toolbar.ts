@@ -11,6 +11,7 @@ export interface ActionMenuSection {
 const actionMenuSectionLabels: Record<SelectionAction['kind'], string> = {
   chat: '阅读与理解',
   translate: '阅读与理解',
+  speak: '阅读与理解',
   explain: '阅读与理解',
   summarize: '阅读与理解',
   rewrite: '写作与回复',

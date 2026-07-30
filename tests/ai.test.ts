@@ -24,6 +24,10 @@ const streamSettings = {
   defaultProviderId: 'default-provider',
   targetLanguage: '简体中文',
   autoDictionary: false,
+  speechEnabled: true,
+  speechRate: 'normal',
+  speechLanguageMode: 'auto',
+  speechAutoStop: true,
   jsonExtractionSchema: '',
   maxInputCharacters: 30_000,
   historyEnabled: false,
@@ -45,6 +49,14 @@ describe('AI request helpers', () => {
     const messages = buildMessages({ id: 'translate', label: '翻译', kind: 'translate', enabled: true }, 'Hello', '日语')
     expect(messages[0].content).toContain('日语')
     expect(messages[1].content).toBe('Hello')
+  })
+
+  it('never builds an AI request for local speech', () => {
+    expect(() => buildMessages(
+      { id: 'speak', label: '朗读', kind: 'speak', enabled: true },
+      '本地朗读',
+      '简体中文'
+    )).toThrow('不调用模型服务')
   })
 
   it('allows reverse translation to define its own output format', () => {

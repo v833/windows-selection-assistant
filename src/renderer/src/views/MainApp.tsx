@@ -35,6 +35,7 @@ import {
   Sparkles,
   Sun,
   Trash2,
+  Volume2,
   WandSparkles,
   X,
   Zap
@@ -52,6 +53,8 @@ import type {
   ProviderProfile,
   SelectionAction,
   SessionStorageInfo,
+  SpeechLanguageMode,
+  SpeechRate,
   SettingsSection,
   ThemeMode
 } from '../../../shared/types'
@@ -195,6 +198,37 @@ function GeneralSettings({
         </SettingRow>
         <SettingRow title="开机启动" description="登录 Windows 后自动在托盘运行">
           <Switch checked={settings.launchAtLogin} onChange={(launchAtLogin) => void save({ launchAtLogin })} label="开机启动" />
+        </SettingRow>
+      </section>
+
+      <section className="settings-section">
+        <SectionTitle icon={Volume2} title="本地朗读" />
+        <SettingRow title="启用本地朗读" description="使用 Windows 系统语音处理选中文本和结果内容，不上传、不保存音频">
+          <Switch checked={settings.speechEnabled} onChange={(speechEnabled) => void save({ speechEnabled })} label="启用本地朗读" />
+        </SettingRow>
+        <SettingRow title="朗读语言" description="自动根据内容选择中文或英文语音；系统默认模式不指定语言">
+          <select
+            className="setting-select"
+            value={settings.speechLanguageMode}
+            onChange={(event) => void save({ speechLanguageMode: event.target.value as SpeechLanguageMode })}
+            aria-label="朗读语言">
+            <option value="auto">自动选择</option>
+            <option value="system">系统默认</option>
+          </select>
+        </SettingRow>
+        <SettingRow title="朗读速度" description="调整本地语音速度，不会重新请求模型">
+          <select
+            className="setting-select"
+            value={settings.speechRate}
+            onChange={(event) => void save({ speechRate: event.target.value as SpeechRate })}
+            aria-label="朗读速度">
+            <option value="slow">慢速</option>
+            <option value="normal">标准</option>
+            <option value="fast">快速</option>
+          </select>
+        </SettingRow>
+        <SettingRow title="新选区时停止" description="开始新的划词后停止上一段朗读，避免声音重叠">
+          <Switch checked={settings.speechAutoStop} onChange={(speechAutoStop) => void save({ speechAutoStop })} label="新选区时停止朗读" />
         </SettingRow>
       </section>
 
@@ -821,6 +855,7 @@ function ActionRow({
   onDelete?: () => void
 }) {
   const [advanced, setAdvanced] = useState(false)
+  const canConfigureAI = action.kind !== 'speak'
 
   return (
     <div className="action-group">
@@ -839,15 +874,17 @@ function ActionRow({
             </button>
           </div>
           <ShortcutInput action={action} onChange={onShortcutChange} />
-          <button
-            className={advanced ? 'icon-button pinned' : 'icon-button'}
-            type="button"
-            onClick={() => setAdvanced(!advanced)}
-            aria-expanded={advanced}
-            aria-label={`配置${action.label}的模型与提示词`}
-            title="模型与提示词">
-            {advanced ? <ChevronDown size={15} /> : <Settings2 size={15} />}
-          </button>
+          {canConfigureAI && (
+            <button
+              className={advanced ? 'icon-button pinned' : 'icon-button'}
+              type="button"
+              onClick={() => setAdvanced(!advanced)}
+              aria-expanded={advanced}
+              aria-label={`配置${action.label}的模型与提示词`}
+              title="模型与提示词">
+              {advanced ? <ChevronDown size={15} /> : <Settings2 size={15} />}
+            </button>
+          )}
           <button
             className={action.pinned ? 'icon-button pinned' : 'icon-button'}
             onClick={onPin}
@@ -875,7 +912,7 @@ function ActionRow({
           ))}
         </div>
       )}
-      {advanced && <ActionAdvancedEditor action={action} settings={settings} onSave={onUpdate} />}
+      {canConfigureAI && advanced && <ActionAdvancedEditor action={action} settings={settings} onSave={onUpdate} />}
     </div>
   )
 }
@@ -1113,6 +1150,7 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (che
 function actionIcon(kind: SelectionAction['kind']) {
   if (kind === 'chat') return <MessageCircle size={17} />
   if (kind === 'translate') return <Languages size={17} />
+  if (kind === 'speak') return <Volume2 size={17} />
   if (kind === 'explain') return <CircleHelp size={17} />
   if (kind === 'summarize') return <Copy size={17} />
   if (kind === 'rewrite') return <Sparkles size={17} />
@@ -1127,6 +1165,7 @@ function actionDescription(kind: SelectionAction['kind']) {
   const descriptions: Record<SelectionAction['kind'], string> = {
     chat: '围绕选中文本连续提问',
     translate: '直接翻译或反向翻译',
+    speak: '使用 Windows 本地语音朗读选中文本',
     explain: '解释含义与背景',
     summarize: '提炼核心信息',
     rewrite: '优化表达并保持原意',
