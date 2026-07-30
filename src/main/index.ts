@@ -41,6 +41,7 @@ import type {
   SelectionPayload,
   SessionExportFormat,
   SettingsSection,
+  SpeechStatus,
   WindowBounds
 } from '../shared/types'
 import { fitWindowBoundsToArea } from '../shared/windowBounds'
@@ -48,6 +49,7 @@ import { streamCompletion, testConnection } from './ai'
 import { SelectionService } from './selection'
 import { SessionStore } from './sessionStore'
 import { SettingsStore } from './settings'
+import { SpeechService } from './speech'
 
 let mainWindow: BrowserWindow | null = null
 let toolbarWindow: BrowserWindow | null = null
@@ -56,6 +58,7 @@ let tray: Tray | null = null
 let settingsStore: SettingsStore
 let sessionStore: SessionStore
 let selectionService: SelectionService
+let speechService: SpeechService
 let lastSelection: TextSelectionData | null = null
 let pendingAction: ActionPayload | null = null
 let toolbarReady = false
@@ -263,7 +266,6 @@ function showAction(actionId: string, variantId?: string): void {
 
   const selectedAction = selectedVariantId ? resolveActionVariant(action, selectedVariantId) : action
   if (!selectedAction) return
-  const requestProfile = resolveRequestProfile(settings, selectedAction)
 
   const isOverflowAction = splitToolbarActions(settings.actions).overflow.some((item) => item.id === action.id)
   if (settings.showRecentActions && isOverflowAction) {
@@ -274,6 +276,22 @@ function showAction(actionId: string, variantId?: string): void {
       )
     }, '记录最近动作')
   }
+
+  if (selectedAction.kind === 'speak') {
+    toolbarWindow?.hide()
+    const speechId = crypto.randomUUID()
+    if (!settings.speechEnabled) {
+      speechService.fail(speechId, '朗读功能已关闭，请在常规设置中重新启用。')
+      return
+    }
+    speechService.speak(lastSelection.text, speechId, {
+      rate: settings.speechRate,
+      languageMode: settings.speechLanguageMode
+    })
+    return
+  }
+
+  const requestProfile = resolveRequestProfile(settings, selectedAction)
 
   pendingAction = {
     action: selectedAction,
@@ -531,6 +549,12 @@ function broadcastStatus(status: AssistantStatus): void {
   rebuildTrayMenu()
 }
 
+function broadcastSpeechStatus(status: SpeechStatus): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('speech:status-changed', status)
+  }
+}
+
 function rebuildTrayMenu(): void {
   if (!tray || !settingsStore || !selectionService) return
   const settings = settingsStore.get()
@@ -606,6 +630,20 @@ function registerIpc(): void {
     return settings
   })
   ipcMain.handle('assistant:status', () => selectionService.status())
+  ipcMain.handle('speech:status', () => speechService.status())
+  ipcMain.on('speech:speak', (_event, text: unknown, speechId: unknown) => {
+    if (typeof text !== 'string' || typeof speechId !== 'string') return
+    const settings = settingsStore.get()
+    if (!settings.speechEnabled) {
+      speechService.fail(speechId, '朗读功能已关闭，请在常规设置中重新启用。')
+      return
+    }
+    speechService.speak(text, speechId, {
+      rate: settings.speechRate,
+      languageMode: settings.speechLanguageMode
+    })
+  })
+  ipcMain.on('speech:stop', () => speechService.stop())
   ipcMain.handle('assistant:set-enabled', (_event, enabled: boolean) => {
     settingsStore.update({ enabled })
     const status = selectionService.setEnabled(enabled)
@@ -674,7 +712,10 @@ function registerIpc(): void {
     if (!window) return
     if (window === mainWindow) window.hide()
     else if (window === toolbarWindow) window.hide()
-    else window.close()
+    else {
+      speechService.stop()
+      window.close()
+    }
   })
   ipcMain.on('window:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize())
 
@@ -738,9 +779,11 @@ app.whenReady().then(() => {
     }
   })
   toolbarWindow = createToolbarWindow()
+  speechService = new SpeechService('powershell.exe', broadcastSpeechStatus)
   selectionService = new SelectionService(
     () => toolbarWindow,
     (selection) => {
+      if (settingsStore.get().speechAutoStop) speechService.stop()
       lastSelection = selection
       sendSelection()
     },
@@ -759,6 +802,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   isQuitting = true
   selectionService?.cleanup()
+  speechService?.stop()
   globalShortcut.unregisterAll()
   for (const controller of requests.values()) controller.abort()
 })

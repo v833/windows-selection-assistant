@@ -13,7 +13,7 @@ describe('selection actions', () => {
     const kinds = defaultActions.map((action) => action.kind)
     const variantLabels = defaultActions.flatMap((action) => action.variants?.map((variant) => variant.label) ?? [])
 
-    expect(kinds).toEqual(expect.arrayContaining(['writing', 'extract', 'analysis', 'code']))
+    expect(kinds).toEqual(expect.arrayContaining(['speak', 'writing', 'extract', 'analysis', 'code']))
     expect(variantLabels).toEqual(expect.arrayContaining([
       '纠错',
       '精简为一句话',
@@ -68,6 +68,12 @@ describe('selection actions', () => {
 
     expect(merged.find((action) => action.id === 'chat')?.enabled).toBe(false)
     expect(merged.find((action) => action.id === 'chat')?.pinned).toBe(true)
+    expect(merged.find((action) => action.id === 'speak')).toMatchObject({
+      label: '朗读',
+      kind: 'speak',
+      enabled: true,
+      pinned: true
+    })
     expect(merged.find((action) => action.id === 'writing')?.pinned).toBe(false)
     expect(merged.find((action) => action.id === 'custom-old')?.prompt).toBe('保留我')
     expect(merged.find((action) => action.id === 'translate')?.variants).toHaveLength(2)

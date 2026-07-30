@@ -4,6 +4,7 @@ import { Highlight, themes } from 'prism-react-renderer'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { sanitizeExternalUrl } from '../../../shared/markdown'
+import { SpeechButton } from './SpeechButton'
 
 export function MarkdownContent({ content }: { content: string }) {
   return (
@@ -48,9 +49,31 @@ const markdownComponents: Components = {
   img({ alt }) {
     return <span className="markdown-image-placeholder">{alt ? `图片：${alt}` : '图片已隐藏'}</span>
   },
+  h1({ children, node: _node, ...props }) {
+    return <><h1 {...props}>{children}</h1><SpeechButton text={nodeText(children)} label="朗读标题" /></>
+  },
+  h2({ children, node: _node, ...props }) {
+    return <><h2 {...props}>{children}</h2><SpeechButton text={nodeText(children)} label="朗读标题" /></>
+  },
+  h3({ children, node: _node, ...props }) {
+    return <><h3 {...props}>{children}</h3><SpeechButton text={nodeText(children)} label="朗读标题" /></>
+  },
+  h4({ children, node: _node, ...props }) {
+    return <><h4 {...props}>{children}</h4><SpeechButton text={nodeText(children)} label="朗读标题" /></>
+  },
+  p({ children, node: _node, ...props }) {
+    return <><p {...props}>{children}</p><SpeechButton text={nodeText(children)} label="朗读段落" /></>
+  },
   table({ children }) {
     return <div className="markdown-table-wrap"><table>{children}</table></div>
   }
+}
+
+function nodeText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(nodeText).join(' ')
+  if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children)
+  return ''
 }
 
 function CodeBlock({ code, language }: { code: string; language: string }) {

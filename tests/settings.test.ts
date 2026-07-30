@@ -58,6 +58,10 @@ describe('settings persistence', () => {
     expect(settings.theme).toBe('dark')
     expect(settings.historyEnabled).toBe(false)
     expect(settings.historyRetentionLimit).toBe(50)
+    expect(settings.speechEnabled).toBe(true)
+    expect(settings.speechRate).toBe('normal')
+    expect(settings.speechLanguageMode).toBe('auto')
+    expect(settings.speechAutoStop).toBe(true)
     expect(settings.defaultProviderId).toBe('default-provider')
     expect(settings.providers[0]).toMatchObject({
       baseUrl: 'https://legacy.example/v1',
@@ -65,6 +69,23 @@ describe('settings persistence', () => {
       defaultModel: 'legacy-model'
     })
     expect(settings).not.toHaveProperty('encryptedApiKey')
+  })
+
+  it('persists local speech preferences', () => {
+    const store = new SettingsStore()
+    const settings = store.update({
+      speechEnabled: false,
+      speechRate: 'fast',
+      speechLanguageMode: 'system',
+      speechAutoStop: false
+    })
+
+    expect(settings).toMatchObject({
+      speechEnabled: false,
+      speechRate: 'fast',
+      speechLanguageMode: 'system',
+      speechAutoStop: false
+    })
   })
 
   it('encrypts every provider API key without persisting plaintext', () => {

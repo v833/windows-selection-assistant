@@ -17,6 +17,7 @@ export const defaultActions: SelectionAction[] = [
       variant('back-translation', '反向翻译', '先翻译为目标语言，再将译文回译为原文语言。按“译文、回译、差异说明”三个部分输出。')
     ]
   },
+  { id: 'speak', label: '朗读', kind: 'speak', enabled: true, pinned: true },
   { id: 'explain', label: '解释', kind: 'explain', enabled: true, pinned: true },
   { id: 'summarize', label: '总结', kind: 'summarize', enabled: true, pinned: true },
   { id: 'rewrite', label: '润色', kind: 'rewrite', enabled: true, pinned: true },

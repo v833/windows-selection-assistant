@@ -11,6 +11,7 @@ import {
   Settings,
   Sparkles,
   TextQuote,
+  Volume2,
   WandSparkles
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -87,6 +88,7 @@ function ariaShortcut(shortcut?: string): string | undefined {
 function toolbarIcon(kind: SelectionAction['kind']) {
   if (kind === 'chat') return <MessageCircle size={17} />
   if (kind === 'translate') return <Languages size={17} />
+  if (kind === 'speak') return <Volume2 size={17} />
   if (kind === 'explain') return <CircleHelp size={17} />
   if (kind === 'summarize') return <TextQuote size={17} />
   if (kind === 'rewrite') return <Sparkles size={17} />

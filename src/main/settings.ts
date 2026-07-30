@@ -17,6 +17,8 @@ import type {
   AppSettings,
   ProviderProfile,
   SelectionAction,
+  SpeechLanguageMode,
+  SpeechRate,
   ThemeMode,
   WindowBounds
 } from '../shared/types'
@@ -46,6 +48,10 @@ const defaults: AppSettings = {
   defaultProviderId: DEFAULT_PROVIDER_ID,
   targetLanguage: '简体中文',
   autoDictionary: true,
+  speechEnabled: true,
+  speechRate: 'normal',
+  speechLanguageMode: 'auto',
+  speechAutoStop: true,
   jsonExtractionSchema: '',
   maxInputCharacters: DEFAULT_MAX_INPUT_CHARACTERS,
   historyEnabled: false,
@@ -96,6 +102,16 @@ export class SettingsStore {
       autoDictionary: patch.autoDictionary === undefined
         ? this.settings.autoDictionary
         : Boolean(patch.autoDictionary),
+      speechEnabled: patch.speechEnabled === undefined
+        ? this.settings.speechEnabled
+        : Boolean(patch.speechEnabled),
+      speechRate: isSpeechRate(patch.speechRate) ? patch.speechRate : this.settings.speechRate,
+      speechLanguageMode: isSpeechLanguageMode(patch.speechLanguageMode)
+        ? patch.speechLanguageMode
+        : this.settings.speechLanguageMode,
+      speechAutoStop: patch.speechAutoStop === undefined
+        ? this.settings.speechAutoStop
+        : Boolean(patch.speechAutoStop),
       jsonExtractionSchema: patch.jsonExtractionSchema === undefined
         ? this.settings.jsonExtractionSchema
         : String(patch.jsonExtractionSchema).slice(0, 2000),
@@ -151,6 +167,16 @@ export class SettingsStore {
         autoDictionary: persisted.autoDictionary === undefined
           ? defaults.autoDictionary
           : Boolean(persisted.autoDictionary),
+        speechEnabled: persisted.speechEnabled === undefined
+          ? defaults.speechEnabled
+          : Boolean(persisted.speechEnabled),
+        speechRate: isSpeechRate(persisted.speechRate) ? persisted.speechRate : defaults.speechRate,
+        speechLanguageMode: isSpeechLanguageMode(persisted.speechLanguageMode)
+          ? persisted.speechLanguageMode
+          : defaults.speechLanguageMode,
+        speechAutoStop: persisted.speechAutoStop === undefined
+          ? defaults.speechAutoStop
+          : Boolean(persisted.speechAutoStop),
         jsonExtractionSchema: typeof persisted.jsonExtractionSchema === 'string'
           ? persisted.jsonExtractionSchema.slice(0, 2000)
           : defaults.jsonExtractionSchema,
@@ -370,4 +396,12 @@ export class SettingsStore {
 
 function isThemeMode(value: unknown): value is ThemeMode {
   return value === 'system' || value === 'light' || value === 'dark'
+}
+
+function isSpeechRate(value: unknown): value is SpeechRate {
+  return value === 'slow' || value === 'normal' || value === 'fast'
+}
+
+function isSpeechLanguageMode(value: unknown): value is SpeechLanguageMode {
+  return value === 'auto' || value === 'system'
 }

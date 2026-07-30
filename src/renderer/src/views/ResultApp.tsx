@@ -48,6 +48,7 @@ import type {
   SelectionAction
 } from '../../../shared/types'
 import { MarkdownContent } from '../components/MarkdownContent'
+import { SpeechButton } from '../components/SpeechButton'
 
 type RequestState = 'idle' | 'loading' | 'done' | 'error'
 type RequestPhase = 'answer' | 'source-summary'
@@ -500,6 +501,7 @@ export function ResultApp() {
           {payload && (
             <div>
               <small>{payload.selectedText.length.toLocaleString()} 字符 · 约 {sourceTokenCount.toLocaleString()} tokens</small>
+              <SpeechButton text={payload.selectedText} label="朗读原文" className="source-speech-button" />
               <button
                 type="button"
                 onClick={() => setSourceExpanded(!sourceExpanded)}

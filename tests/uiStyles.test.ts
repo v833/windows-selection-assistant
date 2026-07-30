@@ -46,6 +46,19 @@ describe('界面视觉契约', () => {
     expect(mainView).toContain('title="删除动作"')
   })
 
+  it('为本地朗读动作使用喇叭图标并隐藏模型配置', () => {
+    expect(mainProcess).toContain("selectedAction.kind === 'speak'")
+    expect(mainView).toContain("const canConfigureAI = action.kind !== 'speak'")
+    expect(mainView).toContain('<Volume2 size={17} />')
+  })
+
+  it('为结果内容提供可访问的行内朗读入口', () => {
+    expect(resultView).toContain('<SpeechButton text={payload.selectedText} label="朗读原文"')
+    expect(resultView).toContain('<MarkdownContent content={message.content} />')
+    expect(styles).toContain('.speech-button')
+    expect(styles).toContain('.source-speech-button')
+  })
+
   it('不引入被禁止的装饰模式', () => {
     expect(styles).not.toMatch(/linear-gradient|radial-gradient/i)
     expect(styles).not.toMatch(/border-(?:left|right):\s*[2-9]\d*px/i)

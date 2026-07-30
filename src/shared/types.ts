@@ -3,8 +3,17 @@ export type SettingsSection = 'general' | 'model' | 'actions' | 'history' | 'abo
 export type AIErrorKind = 'authentication' | 'model' | 'rate_limit' | 'network' | 'timeout' | 'cancelled' | 'server' | 'configuration' | 'unknown'
 export type SessionContextMode = 'full' | 'truncate' | 'summarize'
 export type SessionExportFormat = 'markdown' | 'json'
+export type SpeechRate = 'slow' | 'normal' | 'fast'
+export type SpeechLanguageMode = 'auto' | 'system'
+export type SpeechState = 'idle' | 'starting' | 'speaking' | 'error'
 
-export type ActionKind = 'chat' | 'translate' | 'explain' | 'summarize' | 'rewrite' | 'writing' | 'extract' | 'analysis' | 'code' | 'custom'
+export interface SpeechStatus {
+  state: SpeechState
+  speechId?: string
+  message?: string
+}
+
+export type ActionKind = 'chat' | 'translate' | 'speak' | 'explain' | 'summarize' | 'rewrite' | 'writing' | 'extract' | 'analysis' | 'code' | 'custom'
 
 export interface ActionVariant {
   id: string
@@ -92,6 +101,10 @@ export interface AppSettings {
   defaultProviderId: string
   targetLanguage: string
   autoDictionary: boolean
+  speechEnabled: boolean
+  speechRate: SpeechRate
+  speechLanguageMode: SpeechLanguageMode
+  speechAutoStop: boolean
   jsonExtractionSchema: string
   maxInputCharacters: number
   historyEnabled: boolean
@@ -168,6 +181,8 @@ export interface SelectionAssistantAPI {
   onSelectionChanged: (listener: (payload: SelectionPayload) => void) => () => void
   onActionPayload: (listener: (payload: ActionPayload) => void) => () => void
   onAIStream: (listener: (event: AIStreamEvent) => void) => () => void
+  getSpeechStatus: () => Promise<SpeechStatus>
+  onSpeechStatusChanged: (listener: (status: SpeechStatus) => void) => () => void
   onSettingsNavigate: (listener: (section: SettingsSection) => void) => () => void
   listSessions: () => Promise<ConversationSession[]>
   saveSession: (session: ConversationSession) => Promise<ConversationSession | null>
@@ -184,6 +199,8 @@ export interface SelectionAssistantAPI {
   resizeToolbar: (width: number, height: number) => void
   runAI: (request: AIRunRequest) => void
   cancelAI: (requestId: string) => void
+  speakText: (text: string, speechId: string) => void
+  stopSpeaking: () => void
   copyText: (text: string) => Promise<void>
   openExternal: (url: string) => Promise<boolean>
   openSettings: (section?: SettingsSection) => void
