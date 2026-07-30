@@ -15,6 +15,7 @@ import {
   type MenuItemConstructorOptions,
   type NativeImage
 } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TextSelectionData } from 'selection-hook'
@@ -23,6 +24,7 @@ import { classifyAIError } from '../shared/aiErrors'
 import { sanitizeExternalUrl } from '../shared/markdown'
 import { resolveRequestProfile } from '../shared/providers'
 import { serializeSession } from '../shared/sessions'
+import { detectLanguageLabel, detectSpeechCulture, isSpeechCulture } from '../shared/speech'
 import {
   groupActionsForMenu,
   normalizeShortcut,
@@ -42,6 +44,7 @@ import type {
   SessionExportFormat,
   SettingsSection,
   SpeechStatus,
+  UpdateStatus,
   WindowBounds
 } from '../shared/types'
 import { fitWindowBoundsToArea } from '../shared/windowBounds'
@@ -68,8 +71,10 @@ let resultWindowHasCustomBounds = false
 let ignoreResultBoundsEvents = false
 let resultBoundsTimer: NodeJS.Timeout | null = null
 let ignoreResultBoundsTimer: NodeJS.Timeout | null = null
+let updateCheckTimer: NodeJS.Timeout | null = null
 const requests = new Map<string, AbortController>()
 const actionMenuIconCache = new Map<string, NativeImage>()
+let updateStatus: UpdateStatus = { state: 'idle', currentVersion: app.getVersion() }
 
 const preloadPath = join(__dirname, '../preload/index.js')
 const titleBarHeight = 44
@@ -286,7 +291,8 @@ function showAction(actionId: string, variantId?: string): void {
     }
     speechService.speak(lastSelection.text, speechId, {
       rate: settings.speechRate,
-      languageMode: settings.speechLanguageMode
+      languageMode: settings.speechLanguageMode,
+      culture: detectSpeechCulture(lastSelection.text)
     })
     return
   }
@@ -300,7 +306,9 @@ function showAction(actionId: string, variantId?: string): void {
     model: requestProfile.model,
     maxInputCharacters: settings.maxInputCharacters,
     historyEnabled: settings.historyEnabled,
-    theme: settings.theme
+    theme: settings.theme,
+    sourceLanguage: detectLanguageLabel(lastSelection.text),
+    targetLanguage: settings.targetLanguage
   }
   toolbarWindow?.hide()
   resultWindow ??= createResultWindow()
@@ -325,6 +333,8 @@ function showSession(sessionId: string): void {
     maxInputCharacters: settings.maxInputCharacters,
     historyEnabled: settings.historyEnabled,
     theme: settings.theme,
+    sourceLanguage: session.sourceLanguage ?? detectLanguageLabel(session.selectedText),
+    targetLanguage: session.targetLanguage ?? settings.targetLanguage,
     session
   }
   resultWindow ??= createResultWindow()
@@ -396,6 +406,83 @@ function persistSettingsSafely(patch: Partial<AppSettings>, operation: string): 
   } catch (error) {
     console.error(`${operation}失败`, error)
   }
+}
+
+function setUpdateStatus(next: Omit<UpdateStatus, 'currentVersion'> & Partial<Pick<UpdateStatus, 'currentVersion'>>): UpdateStatus {
+  updateStatus = { ...next, currentVersion: app.getVersion() }
+  broadcastUpdateStatus(updateStatus)
+  return updateStatus
+}
+
+function configureAutoUpdater(): void {
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.allowDowngrade = false
+  autoUpdater.on('checking-for-update', () => {
+    setUpdateStatus({ state: 'checking' })
+  })
+  autoUpdater.on('update-available', (info) => {
+    setUpdateStatus({ state: 'available', version: info.version, percent: 0 })
+  })
+  autoUpdater.on('update-not-available', (info) => {
+    setUpdateStatus({ state: 'not-available', version: info.version })
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    setUpdateStatus({
+      state: 'downloading',
+      version: updateStatus.version,
+      percent: Math.max(0, Math.min(100, progress.percent))
+    })
+  })
+  autoUpdater.on('update-downloaded', (info) => {
+    setUpdateStatus({ state: 'downloaded', version: info.version, percent: 100 })
+  })
+  autoUpdater.on('error', (error) => {
+    setUpdateStatus({
+      state: 'error',
+      version: updateStatus.version,
+      message: error.message || '更新检查失败'
+    })
+  })
+}
+
+async function checkForUpdates(): Promise<UpdateStatus> {
+  if (!app.isPackaged) return setUpdateStatus({ state: 'error', message: '开发环境不检查更新' })
+  if (updateStatus.state === 'checking' || updateStatus.state === 'downloading') return updateStatus
+  setUpdateStatus({ state: 'checking', version: undefined, percent: undefined, message: undefined })
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    if (!result) {
+      return setUpdateStatus({ state: 'not-available' })
+    }
+  } catch (error) {
+    return setUpdateStatus({
+      state: 'error',
+      message: error instanceof Error ? error.message : '更新检查失败'
+    })
+  }
+  return updateStatus
+}
+
+async function downloadUpdate(): Promise<UpdateStatus> {
+  if (!app.isPackaged) return setUpdateStatus({ state: 'error', message: '开发环境不支持下载更新' })
+  if (updateStatus.state !== 'available') return updateStatus
+  try {
+    setUpdateStatus({ state: 'downloading', percent: 0 })
+    await autoUpdater.downloadUpdate()
+  } catch (error) {
+    return setUpdateStatus({
+      state: 'error',
+      version: updateStatus.version,
+      message: error instanceof Error ? error.message : '更新下载失败'
+    })
+  }
+  return updateStatus
+}
+
+function installUpdate(): void {
+  if (updateStatus.state !== 'downloaded') return
+  autoUpdater.quitAndInstall(false, true)
 }
 
 function actionMenuItem(action: SelectionAction): MenuItemConstructorOptions {
@@ -555,6 +642,12 @@ function broadcastSpeechStatus(status: SpeechStatus): void {
   }
 }
 
+function broadcastUpdateStatus(status: UpdateStatus): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.webContents.send('app:update-status-changed', status)
+  }
+}
+
 function rebuildTrayMenu(): void {
   if (!tray || !settingsStore || !selectionService) return
   const settings = settingsStore.get()
@@ -631,7 +724,7 @@ function registerIpc(): void {
   })
   ipcMain.handle('assistant:status', () => selectionService.status())
   ipcMain.handle('speech:status', () => speechService.status())
-  ipcMain.on('speech:speak', (_event, text: unknown, speechId: unknown) => {
+  ipcMain.on('speech:speak', (_event, text: unknown, speechId: unknown, cultureValue: unknown) => {
     if (typeof text !== 'string' || typeof speechId !== 'string') return
     const settings = settingsStore.get()
     if (!settings.speechEnabled) {
@@ -640,7 +733,8 @@ function registerIpc(): void {
     }
     speechService.speak(text, speechId, {
       rate: settings.speechRate,
-      languageMode: settings.speechLanguageMode
+      languageMode: settings.speechLanguageMode,
+      ...(isSpeechCulture(cultureValue) ? { culture: cultureValue } : {})
     })
   })
   ipcMain.on('speech:stop', () => speechService.stop())
@@ -652,6 +746,10 @@ function registerIpc(): void {
   })
   ipcMain.handle('ai:test', (_event, draft) => testConnection(draft))
   ipcMain.handle('app:info', () => ({ version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome }))
+  ipcMain.handle('app:update-status', () => updateStatus)
+  ipcMain.handle('app:update-check', () => checkForUpdates())
+  ipcMain.handle('app:update-download', () => downloadUpdate())
+  ipcMain.on('app:update-install', installUpdate)
   ipcMain.handle('clipboard:write', (_event, text: string) => clipboard.writeText(text))
   ipcMain.handle('external:open', async (_event, value: unknown) => {
     const url = sanitizeExternalUrl(typeof value === 'string' ? value : undefined)
@@ -764,6 +862,7 @@ if (!hasLock) app.quit()
 app.on('second-instance', () => showMainWindow())
 
 app.whenReady().then(() => {
+  configureAutoUpdater()
   settingsStore = new SettingsStore()
   const initialSettings = settingsStore.get()
   applyNativeTheme(initialSettings.theme)
@@ -797,12 +896,16 @@ app.whenReady().then(() => {
   updateNativeWindowColors()
   app.setLoginItemSettings({ openAtLogin: initialSettings.launchAtLogin })
   selectionService.setEnabled(initialSettings.enabled)
+  updateCheckTimer = setInterval(() => { void checkForUpdates() }, 6 * 60 * 60 * 1000)
+  setTimeout(() => { void checkForUpdates() }, 5000)
 })
 
 app.on('before-quit', () => {
   isQuitting = true
   selectionService?.cleanup()
   speechService?.stop()
+  if (updateCheckTimer) clearInterval(updateCheckTimer)
+  updateCheckTimer = null
   globalShortcut.unregisterAll()
   for (const controller of requests.values()) controller.abort()
 })

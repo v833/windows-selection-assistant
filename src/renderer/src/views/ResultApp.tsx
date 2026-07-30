@@ -39,16 +39,18 @@ import {
   truncateText
 } from '../../../shared/textLimits'
 import { shouldSubmitComposer } from '../../../shared/composer'
+import { createSpeechSegment, detectLanguageLabel, resolveSpeechCulture } from '../../../shared/speech'
 import type {
   ActionPayload,
   AIConversationMessage,
   AIErrorInfo,
   AIStreamEvent,
   ConversationSession,
-  SelectionAction
+  SelectionAction,
+  SpeechSegment
 } from '../../../shared/types'
 import { MarkdownContent } from '../components/MarkdownContent'
-import { SpeechButton } from '../components/SpeechButton'
+import { SpeechButton, SpeechStatusProvider } from '../components/SpeechButton'
 
 type RequestState = 'idle' | 'loading' | 'done' | 'error'
 type RequestPhase = 'answer' | 'source-summary'
@@ -93,6 +95,7 @@ export function ResultApp() {
   const [sessionPersisted, setSessionPersisted] = useState(false)
   const [sessionSaveError, setSessionSaveError] = useState('')
   const [historyActive, setHistoryActive] = useState(false)
+  const [selectedSpeech, setSelectedSpeech] = useState<SpeechSegment | null>(null)
   const contentRef = useRef<HTMLElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const requestId = useRef('')
@@ -189,6 +192,7 @@ export function ResultApp() {
       setSessionPersisted(Boolean(reopenedSession))
       setSessionSaveError('')
       setHistoryActive(next.historyEnabled)
+      setSelectedSpeech(null)
       latestSessionRef.current = reopenedSession ?? null
       document.documentElement.dataset.theme = next.theme
 
@@ -319,6 +323,8 @@ export function ResultApp() {
       programName: payload.programName,
       action: payload.action,
       model: payload.model,
+      sourceLanguage: payload.sourceLanguage,
+      targetLanguage: payload.targetLanguage,
       createdAt: sessionCreatedAt || now,
       updatedAt: now,
       messages: nextMessages
@@ -466,6 +472,31 @@ export function ResultApp() {
     if (session) persistSession(session)
   }
 
+  function updateSelectedSpeech() {
+    if (payload?.action.kind !== 'chat') {
+      setSelectedSpeech(null)
+      return
+    }
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || !selection.rangeCount) {
+      setSelectedSpeech(null)
+      return
+    }
+    const range = selection.getRangeAt(0)
+    if (!contentRef.current?.contains(range.commonAncestorContainer)) {
+      setSelectedSpeech(null)
+      return
+    }
+    if (!assistantElement(range.startContainer) || !assistantElement(range.endContainer)) {
+      setSelectedSpeech(null)
+      return
+    }
+    const text = selection.toString().trim()
+    setSelectedSpeech(text
+      ? createSpeechSegment('selection', text, '朗读选中内容', detectLanguageLabel(text))
+      : null)
+  }
+
   async function copy() {
     const answer = activePhase === 'answer' ? streaming || latestAssistant(messages) : latestAssistant(messages)
     if (!answer) return
@@ -482,7 +513,8 @@ export function ResultApp() {
   )
 
   return (
-    <div className="result-window">
+    <SpeechStatusProvider>
+      <div className="result-window">
       <header className="result-titlebar">
         <div className="result-title">
           <span className="mini-mark">{payload?.action.kind === 'chat' ? <MessageCircle size={14} /> : <Languages size={14} />}</span>
@@ -495,13 +527,19 @@ export function ResultApp() {
         </div>
       </header>
 
-      <section className="source-strip">
+      <section className={payload?.action.kind === 'translate' ? 'source-strip translation-source' : 'source-strip'}>
         <div className="source-header">
-          <span>原文 · {payload?.programName || '选中文本'}</span>
+          <span className="source-heading">
+            <strong>原文</strong>
+            <span className="language-tag">{payload?.sourceLanguage ?? '自动识别'}</span>
+            <em>{payload?.programName || '选中文本'}</em>
+          </span>
           {payload && (
             <div>
               <small>{payload.selectedText.length.toLocaleString()} 字符 · 约 {sourceTokenCount.toLocaleString()} tokens</small>
-              <SpeechButton text={payload.selectedText} label="朗读原文" className="source-speech-button" />
+              <SpeechButton
+                segment={createSpeechSegment('source', payload.selectedText, '朗读原文', payload.sourceLanguage)}
+                className="source-speech-button" />
               <button
                 type="button"
                 onClick={() => setSourceExpanded(!sourceExpanded)}
@@ -532,7 +570,7 @@ export function ResultApp() {
         </section>
       )}
 
-      <main className="result-content" ref={contentRef}>
+      <main className="result-content" ref={contentRef} onMouseUp={updateSelectedSpeech} onKeyUp={updateSelectedSpeech}>
         <div className="conversation">
           {payload?.action.kind === 'chat' && messages.length === 0 && state === 'idle' && sourceStrategy !== null && (
             <div className="conversation-empty"><MessageCircle size={20} /><span>等待提问</span></div>
@@ -543,8 +581,20 @@ export function ResultApp() {
               <article className={`conversation-message ${message.role}`}>
                 <span className="message-role">{message.role === 'user' ? '你' : '助手'}</span>
                 <div className="message-text">
-                  {message.role === 'assistant' ? <MarkdownContent content={message.content} /> : message.content}
+                  {message.role === 'assistant'
+                    ? payload?.action.kind === 'translate' && isInitialAssistantMessage(messages, index)
+                      ? <TranslationResult content={message.content} payload={payload} />
+                      : <MarkdownContent
+                        content={message.content}
+                        language={detectLanguageLabel(message.content)}
+                        segmentPrefix={`message-${index}`} />
+                    : message.content}
                 </div>
+                {message.role === 'assistant' && (payload?.action.kind !== 'translate' || !isInitialAssistantMessage(messages, index)) && (
+                  <SpeechButton
+                    segment={createSpeechSegment('answer', message.content, '朗读本回答', detectLanguageLabel(message.content))}
+                    className="answer-speech-button" />
+                )}
               </article>
             </Fragment>
           ))}
@@ -576,6 +626,13 @@ export function ResultApp() {
           )}
           {notice && <div className="request-notice" role="status">{notice}</div>}
         </div>
+        {selectedSpeech && (
+          <div className="selection-speech-bar" onMouseDown={(event) => event.preventDefault()}>
+            <span>已选 {selectedSpeech.text.length.toLocaleString()} 字符</span>
+            <SpeechButton segment={selectedSpeech} />
+            <button type="button" onClick={() => setSelectedSpeech(null)} aria-label="取消选中朗读" title="取消"><X size={13} /></button>
+          </div>
+        )}
       </main>
 
       <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); sendQuestion() }}>
@@ -623,6 +680,7 @@ export function ResultApp() {
         </div>
       </footer>
     </div>
+    </SpeechStatusProvider>
   )
 }
 
@@ -631,6 +689,95 @@ function latestAssistant(messages: AIConversationMessage[]): string {
     if (messages[index].role === 'assistant') return messages[index].content
   }
   return ''
+}
+
+function assistantElement(node: Node): Element | null {
+  const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
+  return element?.closest('.conversation-message.assistant') ?? null
+}
+
+interface TranslationSection {
+  id: string
+  title: string
+  language: string
+  kind: 'translation' | 'back-translation' | 'answer'
+  content: string
+}
+
+function TranslationResult({ content, payload }: { content: string; payload: ActionPayload }) {
+  const sourceLanguage = payload.sourceLanguage ?? detectLanguageLabel(payload.selectedText)
+  const targetLanguage = payload.targetLanguage ?? '目标语言'
+  const sections = splitTranslationSections(
+    content,
+    payload.action.id === 'translate:back-translation',
+    targetLanguage,
+    sourceLanguage
+  )
+  return (
+    <div className="translation-result">
+      {sections.map((section) => (
+        <section className="translation-section" key={section.id}>
+          <header className="translation-section-header">
+            <div><strong>{section.title}</strong><span className="language-tag">{section.language}</span></div>
+            <SpeechButton
+              segment={createSpeechSegment(
+                section.kind,
+                section.content,
+                `朗读${section.title}`,
+                section.language,
+                '',
+                resolveSpeechCulture(section.language, section.content)
+              )} />
+          </header>
+          <MarkdownContent content={section.content} language={section.language} segmentPrefix={`translation-${section.id}`} />
+        </section>
+      ))}
+      </div>
+  )
+}
+
+export function isInitialAssistantMessage(messages: AIConversationMessage[], index: number): boolean {
+  return messages[index]?.role === 'assistant' && messages.slice(0, index).every((message) => message.role !== 'user')
+}
+
+export function splitTranslationSections(content: string, reverse: boolean, targetLanguage: string, sourceLanguage: string): TranslationSection[] {
+  const source = content.trim()
+  const defaultSection: TranslationSection = {
+    id: 'translation',
+    title: '译文',
+    language: targetLanguage,
+    kind: 'translation',
+    content: source
+  }
+  if (!reverse) return [defaultSection]
+
+  const sections: TranslationSection[] = []
+  let current: TranslationSection | null = null
+  for (const line of source.split(/\r?\n/)) {
+    const heading = /^\s*(?:#{1,6}\s*)?(译文|回译|差异说明|差异|translation|back[- ]?translation|differences?)\s*[:：]?\s*$/i.exec(line)
+    const inline = /^\s*(译文|回译|差异说明|差异)\s*[:：]\s*(.+)$/u.exec(line)
+    const title = heading?.[1] ?? inline?.[1]
+    if (title) {
+      if (current) sections.push({ ...current, content: current.content.trim() })
+      const isBack = /回译|back/i.test(title)
+      const isDifference = /差异|difference/i.test(title)
+      current = {
+        id: isBack ? 'back-translation' : isDifference ? 'difference' : 'translation',
+        title: isBack ? '回译' : isDifference ? '差异说明' : '译文',
+        language: isBack ? sourceLanguage : isDifference ? '说明' : targetLanguage,
+        kind: isBack ? 'back-translation' : isDifference ? 'answer' : 'translation',
+        content: inline?.[2] ?? ''
+      }
+      continue
+    }
+    if (!current) current = { ...defaultSection, content: '' }
+    current.content += `${current.content ? '\n' : ''}${line}`
+  }
+  if (current) sections.push({ ...current, content: current.content.trim() })
+  const validSections = sections.filter((section) => section.content)
+  return validSections.length
+    ? validSections.map((section, index) => ({ ...section, id: `${section.id}-${index + 1}` }))
+    : [defaultSection]
 }
 
 function fallbackError(message: string): AIErrorInfo {

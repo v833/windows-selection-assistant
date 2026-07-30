@@ -6,6 +6,26 @@ export type SessionExportFormat = 'markdown' | 'json'
 export type SpeechRate = 'slow' | 'normal' | 'fast'
 export type SpeechLanguageMode = 'auto' | 'system'
 export type SpeechState = 'idle' | 'starting' | 'speaking' | 'error'
+export type SpeechCulture = 'zh-CN' | 'en-US' | 'ja-JP' | 'ko-KR'
+export type SpeechSegmentKind =
+  | 'source'
+  | 'heading'
+  | 'paragraph'
+  | 'list-item'
+  | 'quote'
+  | 'translation'
+  | 'back-translation'
+  | 'answer'
+  | 'selection'
+
+export interface SpeechSegment {
+  id: string
+  text: string
+  label: string
+  kind: SpeechSegmentKind
+  language?: string
+  culture?: SpeechCulture
+}
 
 export interface SpeechStatus {
   state: SpeechState
@@ -76,6 +96,8 @@ export interface ConversationSession {
   programName: string
   action: SelectionAction
   model: string
+  sourceLanguage?: string
+  targetLanguage?: string
   createdAt: string
   updatedAt: string
   messages: AIConversationMessage[]
@@ -137,6 +159,8 @@ export interface ActionPayload {
   maxInputCharacters: number
   historyEnabled: boolean
   theme: ThemeMode
+  sourceLanguage?: string
+  targetLanguage?: string
   session?: ConversationSession
 }
 
@@ -170,6 +194,16 @@ export interface AppInfo {
   chrome: string
 }
 
+export type UpdateState = 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+
+export interface UpdateStatus {
+  state: UpdateState
+  currentVersion: string
+  version?: string
+  percent?: number
+  message?: string
+}
+
 export interface SelectionAssistantAPI {
   getSettings: () => Promise<AppSettings>
   saveSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>
@@ -177,6 +211,11 @@ export interface SelectionAssistantAPI {
   setEnabled: (enabled: boolean) => Promise<AssistantStatus>
   testConnection: (draft: ProviderProfile) => Promise<{ ok: boolean; message: string }>
   getAppInfo: () => Promise<AppInfo>
+  getUpdateStatus: () => Promise<UpdateStatus>
+  checkForUpdates: () => Promise<UpdateStatus>
+  downloadUpdate: () => Promise<UpdateStatus>
+  installUpdate: () => void
+  onUpdateStatusChanged: (listener: (status: UpdateStatus) => void) => () => void
   onStatusChanged: (listener: (status: AssistantStatus) => void) => () => void
   onSelectionChanged: (listener: (payload: SelectionPayload) => void) => () => void
   onActionPayload: (listener: (payload: ActionPayload) => void) => () => void
@@ -199,7 +238,7 @@ export interface SelectionAssistantAPI {
   resizeToolbar: (width: number, height: number) => void
   runAI: (request: AIRunRequest) => void
   cancelAI: (requestId: string) => void
-  speakText: (text: string, speechId: string) => void
+  speakText: (text: string, speechId: string, culture?: SpeechCulture) => void
   stopSpeaking: () => void
   copyText: (text: string) => Promise<void>
   openExternal: (url: string) => Promise<boolean>

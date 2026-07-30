@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { SpeechLanguageMode, SpeechRate, SpeechStatus } from '../shared/types'
-import { cleanSpeechText } from '../shared/speech'
+import type { SpeechCulture, SpeechLanguageMode, SpeechRate, SpeechStatus } from '../shared/types'
+import { cleanSpeechText, detectSpeechCulture } from '../shared/speech'
 
 export const MAX_SPEECH_CHARACTERS = 4000
 
@@ -22,8 +22,8 @@ export function prepareSpeechText(text: string): string {
   return `${normalized.slice(0, MAX_SPEECH_CHARACTERS - 3)}...`
 }
 
-export function speechCulture(text: string): 'zh-CN' | 'en-US' {
-  return /[\u3400-\u9fff]/.test(text) ? 'zh-CN' : 'en-US'
+export function speechCulture(text: string, preferredCulture?: SpeechCulture): SpeechCulture {
+  return preferredCulture ?? detectSpeechCulture(text)
 }
 
 function speechRateValue(rate: SpeechRate): number {
@@ -35,6 +35,7 @@ function speechRateValue(rate: SpeechRate): number {
 export interface SpeechOptions {
   rate: SpeechRate
   languageMode: SpeechLanguageMode
+  culture?: SpeechCulture
 }
 
 export class SpeechService {
@@ -77,7 +78,7 @@ export class SpeechService {
         env: {
           ...process.env,
           SELECTION_ASSISTANT_SPEECH_TEXT: prepared,
-          SELECTION_ASSISTANT_SPEECH_CULTURE: options.languageMode === 'auto' ? speechCulture(prepared) : '',
+          SELECTION_ASSISTANT_SPEECH_CULTURE: options.languageMode === 'auto' ? speechCulture(prepared, options.culture) : '',
           SELECTION_ASSISTANT_SPEECH_RATE: String(speechRateValue(options.rate))
         }
       })

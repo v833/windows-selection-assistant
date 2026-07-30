@@ -97,6 +97,20 @@ describe('SessionStore', () => {
     expect(getActiveContextMessages(value.messages, 2)).toEqual([{ role: 'user', content: '新上下文问题' }])
   })
 
+  it('preserves translation language metadata when reopening history', () => {
+    const value = session('translation')
+    value.sourceLanguage = '英语'
+    value.targetLanguage = '简体中文'
+    const store = new SessionStore(filePath, cipher)
+
+    store.save(value, true, 50)
+
+    expect(store.get('translation')).toMatchObject({
+      sourceLanguage: '英语',
+      targetLanguage: '简体中文'
+    })
+  })
+
   it('rechecks full history sessions against the current input limit', () => {
     expect(resolveInitialContextMode('full', 30001, 30000)).toBeNull()
     expect(resolveInitialContextMode('full', 30000, 30000)).toBe('full')

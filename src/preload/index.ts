@@ -9,7 +9,9 @@ import type {
   SelectionPayload,
   SessionExportFormat,
   SettingsSection,
-  SpeechStatus
+  SpeechCulture,
+  SpeechStatus,
+  UpdateStatus
 } from '../shared/types'
 
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
@@ -31,6 +33,11 @@ const api: SelectionAssistantAPI = {
   onAIStream: (listener: (event: AIStreamEvent) => void) => subscribe('ai:stream', listener),
   getSpeechStatus: () => ipcRenderer.invoke('speech:status'),
   onSpeechStatusChanged: (listener: (status: SpeechStatus) => void) => subscribe('speech:status-changed', listener),
+  getUpdateStatus: () => ipcRenderer.invoke('app:update-status'),
+  checkForUpdates: () => ipcRenderer.invoke('app:update-check'),
+  downloadUpdate: () => ipcRenderer.invoke('app:update-download'),
+  installUpdate: () => ipcRenderer.send('app:update-install'),
+  onUpdateStatusChanged: (listener: (status: UpdateStatus) => void) => subscribe('app:update-status-changed', listener),
   onSettingsNavigate: (listener: (section: SettingsSection) => void) => subscribe('settings:navigate', listener),
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   saveSession: (session: ConversationSession) => ipcRenderer.invoke('sessions:save', session),
@@ -47,7 +54,7 @@ const api: SelectionAssistantAPI = {
   resizeToolbar: (width: number, height: number) => ipcRenderer.send('toolbar:resize', { width, height }),
   runAI: (request) => ipcRenderer.send('ai:run', request),
   cancelAI: (requestId: string) => ipcRenderer.send('ai:cancel', requestId),
-  speakText: (text: string, speechId: string) => ipcRenderer.send('speech:speak', text, speechId),
+  speakText: (text: string, speechId: string, culture?: SpeechCulture) => ipcRenderer.send('speech:speak', text, speechId, culture),
   stopSpeaking: () => ipcRenderer.send('speech:stop'),
   copyText: (text: string) => ipcRenderer.invoke('clipboard:write', text),
   openExternal: (url: string) => ipcRenderer.invoke('external:open', url),

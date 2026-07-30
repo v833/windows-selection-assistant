@@ -1,26 +1,44 @@
-import { Children, isValidElement, useState, type ReactNode } from 'react'
+import { Children, createContext, isValidElement, useContext, useState, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
 import { Highlight, themes } from 'prism-react-renderer'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { createSpeechSegment } from '../../../shared/speech'
 import { sanitizeExternalUrl } from '../../../shared/markdown'
+import type { SpeechSegmentKind } from '../../../shared/types'
 import { SpeechButton } from './SpeechButton'
 
-export function MarkdownContent({ content }: { content: string }) {
+type SpeechContainer = 'list-item' | 'blockquote'
+const SpeechContainerContext = createContext<SpeechContainer | null>(null)
+
+export function MarkdownContent({ content, language, segmentPrefix = 'answer' }: {
+  content: string
+  language?: string
+  segmentPrefix?: string
+}) {
+  const segment = (kind: SpeechSegmentKind, text: string, label: string) => createSpeechSegment(
+    kind,
+    text,
+    label,
+    language,
+    segmentPrefix
+  )
+
   return (
     <div className="markdown-content">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         skipHtml
         urlTransform={(url) => sanitizeExternalUrl(url) ?? ''}
-        components={markdownComponents}>
+        components={createMarkdownComponents(segment)}>
         {content}
       </ReactMarkdown>
     </div>
   )
 }
 
-const markdownComponents: Components = {
+function createMarkdownComponents(segment: (kind: SpeechSegmentKind, text: string, label: string) => ReturnType<typeof createSpeechSegment>): Components {
+  return {
   a({ href, children, node: _node, ...props }) {
     const url = sanitizeExternalUrl(href)
     if (!url) return <span>{children}</span>
@@ -50,22 +68,42 @@ const markdownComponents: Components = {
     return <span className="markdown-image-placeholder">{alt ? `图片：${alt}` : '图片已隐藏'}</span>
   },
   h1({ children, node: _node, ...props }) {
-    return <><h1 {...props}>{children}</h1><SpeechButton text={nodeText(children)} label="朗读标题" /></>
+    return <><h1 {...props}>{children}</h1><SpeechButton segment={segment('heading', nodeText(children), '朗读标题')} /></>
   },
   h2({ children, node: _node, ...props }) {
-    return <><h2 {...props}>{children}</h2><SpeechButton text={nodeText(children)} label="朗读标题" /></>
+    return <><h2 {...props}>{children}</h2><SpeechButton segment={segment('heading', nodeText(children), '朗读标题')} /></>
   },
   h3({ children, node: _node, ...props }) {
-    return <><h3 {...props}>{children}</h3><SpeechButton text={nodeText(children)} label="朗读标题" /></>
+    return <><h3 {...props}>{children}</h3><SpeechButton segment={segment('heading', nodeText(children), '朗读标题')} /></>
   },
   h4({ children, node: _node, ...props }) {
-    return <><h4 {...props}>{children}</h4><SpeechButton text={nodeText(children)} label="朗读标题" /></>
+    return <><h4 {...props}>{children}</h4><SpeechButton segment={segment('heading', nodeText(children), '朗读标题')} /></>
   },
   p({ children, node: _node, ...props }) {
-    return <><p {...props}>{children}</p><SpeechButton text={nodeText(children)} label="朗读段落" /></>
+    const speechContainer = useContext(SpeechContainerContext)
+    return <><p {...props}>{children}</p>{speechContainer === null && <SpeechButton segment={segment('paragraph', nodeText(children), '朗读段落')} />}</>
+  },
+  li({ children, node: _node, ...props }) {
+    return (
+      <li {...props}>
+        <SpeechContainerContext.Provider value="list-item">{children}</SpeechContainerContext.Provider>
+        <SpeechButton segment={segment('list-item', nodeText(children), '朗读列表项')} />
+      </li>
+    )
+  },
+  blockquote({ children, node: _node, ...props }) {
+    return (
+      <>
+        <blockquote {...props}>
+          <SpeechContainerContext.Provider value="blockquote">{children}</SpeechContainerContext.Provider>
+        </blockquote>
+        <SpeechButton segment={segment('quote', nodeText(children), '朗读引用')} />
+      </>
+    )
   },
   table({ children }) {
     return <div className="markdown-table-wrap"><table>{children}</table></div>
+  }
   }
 }
 

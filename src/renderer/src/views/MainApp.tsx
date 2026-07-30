@@ -8,9 +8,11 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CircleCheck,
   CircleHelp,
   Code2,
   Copy,
+  Download,
   Eye,
   EyeOff,
   FileJson,
@@ -56,7 +58,8 @@ import type {
   SpeechLanguageMode,
   SpeechRate,
   SettingsSection,
-  ThemeMode
+  ThemeMode,
+  UpdateStatus
 } from '../../../shared/types'
 
 type SettingsPatch = Partial<AppSettings> | ((settings: AppSettings) => Partial<AppSettings>)
@@ -75,25 +78,34 @@ export function MainApp() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [status, setStatus] = useState<AssistantStatus>({ enabled: false, running: false })
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: 'idle', currentVersion: '-' })
   const [saved, setSaved] = useState(false)
   const settingsRef = useRef<AppSettings | null>(null)
   const saveRevision = useRef(0)
 
   useEffect(() => {
-    void Promise.all([window.selectionAPI.getSettings(), window.selectionAPI.getStatus(), window.selectionAPI.getAppInfo()]).then(
-      ([nextSettings, nextStatus, nextAppInfo]) => {
+    void Promise.all([
+      window.selectionAPI.getSettings(),
+      window.selectionAPI.getStatus(),
+      window.selectionAPI.getAppInfo(),
+      window.selectionAPI.getUpdateStatus()
+    ]).then(
+      ([nextSettings, nextStatus, nextAppInfo, nextUpdateStatus]) => {
         settingsRef.current = nextSettings
         setSettings(nextSettings)
         setStatus(nextStatus)
         setAppInfo(nextAppInfo)
+        setUpdateStatus(nextUpdateStatus)
         applyTheme(nextSettings.theme)
       }
     )
     const unsubscribeStatus = window.selectionAPI.onStatusChanged(setStatus)
     const unsubscribeNavigation = window.selectionAPI.onSettingsNavigate(setSection)
+    const unsubscribeUpdateStatus = window.selectionAPI.onUpdateStatusChanged(setUpdateStatus)
     return () => {
       unsubscribeStatus()
       unsubscribeNavigation()
+      unsubscribeUpdateStatus()
     }
   }, [])
 
@@ -174,7 +186,7 @@ export function MainApp() {
         {section === 'model' && <ModelSettings settings={settings} save={save} saved={saved} />}
         {section === 'actions' && <ActionSettings settings={settings} save={save} />}
         {section === 'history' && <HistorySettings settings={settings} save={save} />}
-        {section === 'about' && <About appInfo={appInfo} />}
+        {section === 'about' && <About appInfo={appInfo} updateStatus={updateStatus} />}
       </main>
     </div>
   )
@@ -1114,7 +1126,15 @@ function shortcutKey(event: ReactKeyboardEvent<HTMLInputElement>): string | null
   return names[event.code] ?? null
 }
 
-function About({ appInfo }: { appInfo: AppInfo | null }) {
+function About({ appInfo, updateStatus }: { appInfo: AppInfo | null; updateStatus: UpdateStatus }) {
+  const isChecking = updateStatus.state === 'checking' || updateStatus.state === 'downloading'
+
+  async function update() {
+    if (updateStatus.state === 'available') await window.selectionAPI.downloadUpdate()
+    else if (updateStatus.state === 'downloaded') window.selectionAPI.installUpdate()
+    else await window.selectionAPI.checkForUpdates()
+  }
+
   return (
     <SettingsPage title="关于" subtitle="版本与运行环境">
       <section className="about-panel">
@@ -1123,12 +1143,28 @@ function About({ appInfo }: { appInfo: AppInfo | null }) {
       </section>
       <section className="settings-section version-list">
         <SettingRow title="应用版本" description="当前安装版本"><code>{appInfo?.version ?? '-'}</code></SettingRow>
+        <SettingRow title="版本更新" description={updateDescription(updateStatus)}>
+          <button className="secondary-button compact" type="button" onClick={() => void update()} disabled={isChecking}>
+            {updateStatus.state === 'downloaded' ? <CircleCheck size={14} /> : updateStatus.state === 'available' ? <Download size={14} /> : <RefreshCw className={isChecking ? 'spin' : ''} size={14} />}
+            {updateStatus.state === 'available' ? '下载更新' : updateStatus.state === 'downloaded' ? '立即安装' : isChecking ? updateStatus.state === 'downloading' ? `${Math.round(updateStatus.percent ?? 0)}%` : '检查中' : '检查更新'}
+          </button>
+        </SettingRow>
         <SettingRow title="Electron" description="桌面运行时"><code>{appInfo?.electron ?? '-'}</code></SettingRow>
         <SettingRow title="Chromium" description="界面渲染引擎"><code>{appInfo?.chrome ?? '-'}</code></SettingRow>
         <SettingRow title="选区引擎" description="selection-hook"><code>2.0.2</code></SettingRow>
       </section>
     </SettingsPage>
   )
+}
+
+function updateDescription(status: UpdateStatus): string {
+  if (status.state === 'available') return `发现新版本 ${status.version ?? ''}，下载后重启安装`
+  if (status.state === 'downloaded') return `新版本 ${status.version ?? ''} 已下载，重启后生效`
+  if (status.state === 'downloading') return `正在下载新版本 ${Math.round(status.percent ?? 0)}%`
+  if (status.state === 'checking') return '正在检查 GitHub Releases'
+  if (status.state === 'not-available') return '当前已是最新版本'
+  if (status.state === 'error') return status.message ?? '更新检查失败，可重试'
+  return '启动后自动检查，也可手动检查'
 }
 
 function SettingsPage({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {

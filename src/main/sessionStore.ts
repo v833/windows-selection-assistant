@@ -148,6 +148,8 @@ function normalizeSession(value: unknown): ConversationSession | null {
   const contextMode = session.contextMode === 'truncate' || session.contextMode === 'summarize'
     ? session.contextMode
     : 'full'
+  const sourceLanguage = normalizeOptionalText(session.sourceLanguage)
+  const targetLanguage = normalizeOptionalText(session.targetLanguage)
   const now = new Date().toISOString()
   return {
     id: String(session.id),
@@ -159,10 +161,16 @@ function normalizeSession(value: unknown): ConversationSession | null {
     programName: String(session.programName ?? ''),
     action,
     model: String(session.model ?? ''),
+    ...(sourceLanguage ? { sourceLanguage } : {}),
+    ...(targetLanguage ? { targetLanguage } : {}),
     createdAt: normalizeTimestamp(session.createdAt, now),
     updatedAt: normalizeTimestamp(session.updatedAt, now),
     messages
   }
+}
+
+function normalizeOptionalText(value: unknown): string {
+  return typeof value === 'string' ? value.trim().slice(0, 40) : ''
 }
 
 function normalizeAction(value: unknown): SelectionAction | null {

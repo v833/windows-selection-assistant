@@ -45,6 +45,7 @@
 - **系统托盘常驻**：关闭设置窗口后继续运行，可选择开机启动。
 - **浅色与深色主题**：支持跟随 Windows 系统主题。
 - **本地安全存储**：API Key 使用 Electron `safeStorage` 加密后保存。
+- **应用内更新**：启动后自动检查 GitHub Releases；发现新版本后可在“关于”页面下载并重启安装，不需要手动寻找安装包。
 
 ## 内置动作
 
@@ -82,6 +83,8 @@
 3. 点击“测试当前 Provider”，确认配置可用并保存。
 4. 在其他应用中选中文字，悬停图标查看名称，点击动作执行处理。
 5. 在结果窗口中继续提问。
+
+应用启动后会在后台检查最新版本。发现更新时，打开“关于”页面点击“下载更新”，下载完成后点击“立即安装”；更新包只来自项目配置的 GitHub Releases。
 
 可在“快捷动作”页面固定动作、调整顺序、配置快捷键、关闭不需要的动作或二级选项、配置 JSON 字段或 Schema，并控制是否启用短词词典模式。
 
@@ -128,6 +131,7 @@
 - [React](https://react.dev/)：设置页、悬浮工具条与结果窗口。
 - [selection-hook](https://github.com/0xfullex/selection-hook)：跨应用文本选区监听。
 - [electron-vite](https://electron-vite.org/)：开发与构建工具链。
+- [electron-updater](https://www.electron.build/auto-update)：基于 GitHub Releases 的 Windows 应用更新。
 
 全局选区交互参考了 [Cherry Studio](https://github.com/CherryHQ/cherry-studio) 的划词助手功能。本项目为独立实现，不依赖 Cherry Studio 主应用。
 
@@ -155,6 +159,8 @@ npm run dist:win
 ```
 
 构建产物位于 `release` 目录，包括 NSIS 安装器和便携版。
+
+发布到 GitHub Releases 时使用 `npm run dist:win:publish`，需要设置 `GH_TOKEN`。该命令会上传 NSIS 安装器及 `latest.yml`、blockmap 等更新元数据；便携版不参与应用内自动更新。
 
 ### Windows 手动验证
 

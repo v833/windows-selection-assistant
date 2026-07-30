@@ -84,6 +84,19 @@ describe('selection actions', () => {
     )
   })
 
+  it('refreshes built-in variant prompts while preserving enabled choices', () => {
+    const translate = structuredClone(defaultActions.find((action) => action.id === 'translate'))
+    if (!translate?.variants) throw new Error('translate action is missing variants')
+    translate.variants[1].prompt = '旧版反向翻译要求'
+    translate.variants[1].enabled = false
+
+    const merged = mergeDefaultActions([translate])
+    const reverse = merged.find((action) => action.id === 'translate')?.variants?.find((variant) => variant.id === 'back-translation')
+
+    expect(reverse?.prompt).toContain('三级标题')
+    expect(reverse?.enabled).toBe(false)
+  })
+
   it('resolves only enabled action variants', () => {
     const writing = structuredClone(defaultActions.find((action) => action.id === 'writing'))
     if (!writing?.variants) throw new Error('writing action is missing variants')

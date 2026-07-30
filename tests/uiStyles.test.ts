@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { scripts: Record<string, string> }
 const styles = readFileSync(resolve('src/renderer/src/styles.css'), 'utf8')
 const mainProcess = readFileSync(resolve('src/main/index.ts'), 'utf8')
 const mainView = readFileSync(resolve('src/renderer/src/views/MainApp.tsx'), 'utf8')
@@ -53,10 +54,25 @@ describe('界面视觉契约', () => {
   })
 
   it('为结果内容提供可访问的行内朗读入口', () => {
-    expect(resultView).toContain('<SpeechButton text={payload.selectedText} label="朗读原文"')
-    expect(resultView).toContain('<MarkdownContent content={message.content} />')
+    expect(resultView).toContain("segment={createSpeechSegment('source', payload.selectedText, '朗读原文'")
+    expect(resultView).toContain('language={detectLanguageLabel(message.content)}')
+    expect(resultView).toContain('朗读选中内容')
+    expect(resultView).toContain('<TranslationResult content={message.content} payload={payload} />')
+    expect(resultView).toContain('isInitialAssistantMessage(messages, index)')
+    expect(resultView).toContain('<SpeechStatusProvider>')
     expect(styles).toContain('.speech-button')
     expect(styles).toContain('.source-speech-button')
+    expect(styles).toContain('.translation-section')
+    expect(styles).toContain('.selection-speech-bar')
+  })
+
+  it('在设置页提供应用内更新入口并由主进程定时检查', () => {
+    expect(mainProcess).toContain('autoUpdater.autoDownload = false')
+    expect(mainProcess).toContain('updateCheckTimer = setInterval')
+    expect(mainView).toContain('window.selectionAPI.downloadUpdate()')
+    expect(mainView).toContain('window.selectionAPI.installUpdate()')
+    expect(packageJson.scripts['dist:win']).toContain('nsis portable')
+    expect(packageJson.scripts['dist:win:publish']).toContain('--publish always')
   })
 
   it('不引入被禁止的装饰模式', () => {

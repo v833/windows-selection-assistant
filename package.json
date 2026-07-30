@@ -1,6 +1,6 @@
 {
   "name": "selection-assistant",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "独立的 Windows AI 划词助手",
   "main": "./out/main/index.js",
   "author": "v833 <2507301541@qq.com>",
@@ -21,9 +21,11 @@
     "build": "npm run typecheck && electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "dist:win": "npm run build && electron-builder --win --x64"
+    "dist:win": "npm run build && electron-builder --win nsis portable --x64",
+    "dist:win:publish": "npm run build && electron-builder --win nsis portable --x64 --publish always"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "lucide-react": "^0.525.0",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.1.0",
@@ -62,6 +64,12 @@
     "directories": {
       "output": "release",
       "buildResources": "resources"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "v833",
+      "repo": "windows-selection-assistant",
+      "releaseType": "release"
     },
     "win": {
       "executableName": "SelectionAssistant",

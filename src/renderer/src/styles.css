@@ -192,6 +192,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .source-strip { flex: 0 0 auto; min-height: 0; padding: 9px 17px; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
 .source-header, .source-header > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .source-header > span { color: var(--muted); font-size: 11px; font-weight: 650; }
+.source-heading { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.source-heading strong { color: var(--ink); font-weight: 650; }
+.source-heading em { margin: 0; overflow: hidden; color: var(--subtle); font-size: 10.5px; font-style: normal; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.language-tag { display: inline-flex; align-items: center; min-height: 18px; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line)); border-radius: 4px; color: var(--accent-hover); background: var(--accent-soft); font-size: 10px; font-weight: 600; white-space: nowrap; }
 .source-header small { color: var(--subtle); font-size: 10.5px; }
 .source-header button { display: inline-flex; align-items: center; gap: 3px; padding: 3px 5px; border-radius: 5px; color: var(--muted); font-size: 11px; }
 .source-header button:hover { color: var(--ink); background: var(--surface-strong); }
@@ -226,6 +230,17 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .speech-button.error { color: var(--danger); background: var(--danger-soft); }
 .speech-button .speech-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 .source-speech-button { margin-left: 2px; }
+.answer-speech-button { margin: -6px 0 0; }
+.translation-result { display: grid; gap: 15px; }
+.translation-section { padding: 12px 13px 3px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); }
+.translation-section-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
+.translation-section-header > div { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.translation-section-header strong { color: var(--ink); font-size: 12px; font-weight: 650; }
+.translation-section .markdown-content > .speech-button { margin-bottom: 8px; }
+.selection-speech-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: flex-end; gap: 7px; margin: 14px 0 -7px; padding: 5px 7px 5px 10px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: var(--radius-sm); color: var(--muted); background: var(--surface); box-shadow: 0 4px 16px color-mix(in srgb, var(--ink) 10%, transparent); font-size: 10.5px; }
+.selection-speech-bar > span { margin-right: auto; }
+.selection-speech-bar > button:last-child { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px; color: var(--subtle); }
+.selection-speech-bar > button:last-child:hover { color: var(--ink); background: var(--surface-strong); }
 .source-header > div { justify-content: flex-end; }
 .markdown-content > h1 + .speech-button, .markdown-content > h2 + .speech-button, .markdown-content > h3 + .speech-button, .markdown-content > h4 + .speech-button { margin: -4px 0 8px; }
 .markdown-content p, .markdown-content ul, .markdown-content ol, .markdown-content blockquote, .markdown-content pre, .markdown-content table { margin: 0 0 13px; }

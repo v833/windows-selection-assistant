@@ -14,7 +14,7 @@ export const defaultActions: SelectionAction[] = [
     pinned: true,
     variants: [
       variant('direct', '直接翻译', '翻译为目标语言，只输出译文并保留原有格式。'),
-      variant('back-translation', '反向翻译', '先翻译为目标语言，再将译文回译为原文语言。按“译文、回译、差异说明”三个部分输出。')
+      variant('back-translation', '反向翻译', '先翻译为目标语言，再将译文回译为原文语言。按“译文、回译、差异说明”三个部分输出，并分别使用“译文”“回译”“差异说明”三级标题。')
     ]
   },
   { id: 'speak', label: '朗读', kind: 'speak', enabled: true, pinned: true },
@@ -100,7 +100,12 @@ export function mergeDefaultActions(actions: SelectionAction[]): SelectionAction
       ...defaultAction,
       ...action,
       ...(defaultAction.variants
-        ? { variants: defaultAction.variants.map((item) => ({ ...item, ...variantsById.get(item.id) })) }
+        ? {
+            variants: defaultAction.variants.map((item) => ({
+              ...item,
+              enabled: variantsById.get(item.id)?.enabled ?? item.enabled
+            }))
+          }
         : {})
     }
   })

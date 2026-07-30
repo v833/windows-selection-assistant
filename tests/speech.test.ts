@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_SPEECH_CHARACTERS, prepareSpeechText, speechCulture } from '../src/main/speech'
-import { cleanSpeechText } from '../src/shared/speech'
+import {
+  cleanSpeechText,
+  createSpeechSegment,
+  detectLanguageLabel,
+  detectSpeechCulture,
+  resolveSpeechCulture
+} from '../src/shared/speech'
 
 describe('Windows local speech', () => {
   it('trims selected text and limits very long speech', () => {
@@ -24,5 +30,24 @@ describe('Windows local speech', () => {
     expect(text).not.toContain('https://example.com')
     expect(text).not.toContain('const value')
     expect(text).not.toContain('/ˈtaɪp')
+  })
+
+  it('creates typed speech segments with stable identity and language labels', () => {
+    const segment = createSpeechSegment('translation', 'Hello', '朗读译文', '英语', 'translation-0')
+
+    expect(segment).toMatchObject({
+      id: 'translation-0-translation-42628b2',
+      text: 'Hello',
+      label: '朗读译文',
+      kind: 'translation',
+      language: '英语'
+    })
+    expect(detectLanguageLabel('Hello')).toBe('英语')
+    expect(detectLanguageLabel('你好')).toBe('中文')
+    expect(detectLanguageLabel('こんにちは')).toBe('日语')
+    expect(detectLanguageLabel('한국어')).toBe('韩语')
+    expect(detectSpeechCulture('こんにちは')).toBe('ja-JP')
+    expect(resolveSpeechCulture('简体中文', '123')).toBe('zh-CN')
+    expect(segment.culture).toBe('en-US')
   })
 })
