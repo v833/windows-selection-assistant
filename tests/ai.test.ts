@@ -28,6 +28,8 @@ const streamSettings = {
   speechRate: 'normal',
   speechLanguageMode: 'auto',
   speechAutoStop: true,
+  ocrEnabled: true,
+  ocrShortcut: 'Ctrl+Shift+S',
   jsonExtractionSchema: '',
   maxInputCharacters: 30_000,
   historyEnabled: false,

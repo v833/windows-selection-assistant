@@ -1,6 +1,6 @@
 {
   "name": "selection-assistant",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "独立的 Windows AI 划词助手",
   "main": "./out/main/index.js",
   "author": "v833 <2507301541@qq.com>",
@@ -25,8 +25,10 @@
     "dist:win:publish": "npm run build && electron-builder --win nsis portable --x64 --publish always"
   },
   "dependencies": {
+    "@arcships/light-ocr": "0.5.7",
     "electron-updater": "^6.8.9",
     "lucide-react": "^0.525.0",
+    "pdfjs-dist": "6.2.108",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -50,7 +52,8 @@
     "appId": "com.local.selectionassistant",
     "productName": "划词助手",
     "asarUnpack": [
-      "node_modules/selection-hook/**/*"
+      "node_modules/selection-hook/**/*",
+      "node_modules/@arcships/**/*"
     ],
     "npmRebuild": false,
     "files": [

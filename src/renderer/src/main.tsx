@@ -12,6 +12,14 @@ const Component = lazy(async () => {
     const module = await import('./views/ResultApp')
     return { default: module.ResultApp }
   }
+  if (view === 'capture') {
+    const module = await import('./views/CaptureApp')
+    return { default: module.CaptureApp }
+  }
+  if (view === 'pdf') {
+    const module = await import('./views/PdfApp')
+    return { default: module.PdfApp }
+  }
   const module = await import('./views/MainApp')
   return { default: module.MainApp }
 })

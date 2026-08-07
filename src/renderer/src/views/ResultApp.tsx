@@ -10,6 +10,7 @@ import {
   MessageCircle,
   MessageSquarePlus,
   Minus,
+  PenLine,
   RefreshCw,
   Scissors,
   SendHorizontal,
@@ -88,6 +89,8 @@ export function ResultApp() {
   const [sourceSummary, setSourceSummary] = useState('')
   const [storedContextText, setStoredContextText] = useState('')
   const [sourceExpanded, setSourceExpanded] = useState(false)
+  const [editedSource, setEditedSource] = useState<string | null>(null)
+  const [sourceEditing, setSourceEditing] = useState(false)
   const [contextStartIndex, setContextStartIndex] = useState(0)
   const [sessionId, setSessionId] = useState('')
   const [sessionTitle, setSessionTitle] = useState('')
@@ -185,6 +188,8 @@ export function ResultApp() {
       setSourceSummary(reopenedSession?.contextMode === 'summarize' ? reopenedSession.contextText : '')
       setStoredContextText(reopenedSession?.contextText ?? '')
       setSourceExpanded(false)
+      setEditedSource(null)
+      setSourceEditing(false)
       setContextStartIndex(reopenedSession?.contextStartIndex ?? 0)
       setSessionId(reopenedSession?.id ?? crypto.randomUUID())
       setSessionTitle(reopenedSession?.title ?? createSessionTitle(next.selectedText, next.action.label))
@@ -283,11 +288,12 @@ export function ResultApp() {
 
   const effectiveSelectedText = useMemo(() => {
     if (!payload) return ''
+    if (editedSource !== null) return editedSource
     if (sourceStrategy === 'truncate') return storedContextText || truncateText(payload.selectedText, payload.maxInputCharacters).text
     if (sourceStrategy === 'summarize') return sourceSummary
     if (sourceStrategy === 'full') return payload.selectedText
     return ''
-  }, [payload, sourceStrategy, sourceSummary, storedContextText])
+  }, [payload, sourceStrategy, sourceSummary, storedContextText, editedSource])
 
   const activeContextMessages = useMemo(
     () => getActiveContextMessages(messages, contextStartIndex),
@@ -362,6 +368,21 @@ export function ResultApp() {
       phase: 'source-summary',
       resumeAfterSummary: messages.length > 0
     })
+  }
+
+  function applyEditedSource() {
+    if (!payload || editedSource === null || editedSource.trim() === '') return
+    setSourceStrategy('full')
+    setContextStartIndex(0)
+    setEditedSource(editedSource.trim())
+    setSourceEditing(false)
+    setSourceExpanded(false)
+    setMessages([])
+    setDraft('')
+    setError(null)
+    setNotice('已使用修改后的原文重新处理。')
+    if (payload.action.kind === 'chat' || !editedSource.trim()) setState('idle')
+    else run(payload, [], { selectedText: editedSource.trim() })
   }
 
   function sendQuestion() {
@@ -540,6 +561,17 @@ export function ResultApp() {
               <SpeechButton
                 segment={createSpeechSegment('source', payload.selectedText, '朗读原文', payload.sourceLanguage)}
                 className="source-speech-button" />
+              {payload.source === 'ocr' && (
+                <button
+                  type="button"
+                  className={sourceEditing ? 'active' : ''}
+                  onClick={() => setSourceEditing(!sourceEditing)}
+                  aria-pressed={sourceEditing}
+                  aria-label="编辑识别文本">
+                  <PenLine size={13} />
+                  {sourceEditing ? '完成' : '编辑'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setSourceExpanded(!sourceExpanded)}
@@ -551,7 +583,22 @@ export function ResultApp() {
             </div>
           )}
         </div>
-        <p id="selected-source" className="expanded" hidden={!sourceExpanded}>{payload?.selectedText}</p>
+        {sourceEditing && payload ? (
+          <div className="source-edit">
+            <textarea
+              value={editedSource ?? payload.selectedText}
+              onChange={(event) => setEditedSource(event.target.value)}
+              aria-label="编辑识别文本"
+              rows={6}
+            />
+            <div className="source-edit-actions">
+              <button type="button" onClick={() => { setEditedSource(null); setSourceEditing(false) }}>取消</button>
+              <button type="button" className="primary" onClick={applyEditedSource} disabled={!editedSource?.trim()}>应用并重新处理</button>
+            </div>
+          </div>
+        ) : (
+          <p id="selected-source" className="expanded" hidden={!sourceExpanded}>{payload?.selectedText}</p>
+        )}
         {sourceStrategy === 'truncate' && <em>当前请求使用截断后的 {effectiveSelectedText.length.toLocaleString()} 字符内容</em>}
         {sourceSummary && <em>当前请求使用模型压缩后的 {sourceSummary.length.toLocaleString()} 字符摘要</em>}
       </section>

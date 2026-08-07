@@ -1,5 +1,6 @@
 export type ThemeMode = 'system' | 'light' | 'dark'
 export type SettingsSection = 'general' | 'model' | 'actions' | 'history' | 'about'
+export type SelectionSource = 'selection' | 'ocr'
 export type AIErrorKind = 'authentication' | 'model' | 'rate_limit' | 'network' | 'timeout' | 'cancelled' | 'server' | 'configuration' | 'unknown'
 export type SessionContextMode = 'full' | 'truncate' | 'summarize'
 export type SessionExportFormat = 'markdown' | 'json'
@@ -127,6 +128,8 @@ export interface AppSettings {
   speechRate: SpeechRate
   speechLanguageMode: SpeechLanguageMode
   speechAutoStop: boolean
+  ocrEnabled: boolean
+  ocrShortcut: string
   jsonExtractionSchema: string
   maxInputCharacters: number
   historyEnabled: boolean
@@ -149,6 +152,7 @@ export interface SelectionPayload {
   actions: SelectionAction[]
   hasMoreActions: boolean
   theme: ThemeMode
+  source?: SelectionSource
 }
 
 export interface ActionPayload {
@@ -161,7 +165,32 @@ export interface ActionPayload {
   theme: ThemeMode
   sourceLanguage?: string
   targetLanguage?: string
+  source?: SelectionSource
   session?: ConversationSession
+}
+
+export interface OcrCaptureRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface CaptureImagePayload {
+  dataUrl: string
+  scale: number
+}
+
+export interface PdfRenderPayload {
+  id: string
+  data: Uint8Array
+  dpi: number
+}
+
+export interface PdfPagePayload {
+  id: string
+  index: number
+  dataUrl: string
 }
 
 export interface AIRunRequest {
@@ -236,6 +265,17 @@ export interface SelectionAssistantAPI {
   selectAction: (actionId: string, variantId?: string) => void
   openActionMenu: () => void
   resizeToolbar: (width: number, height: number) => void
+  startOcrCapture: () => void
+  startPdfOcr: () => void
+  captureReady: () => void
+  confirmCaptureRegion: (region: OcrCaptureRegion) => void
+  cancelCapture: () => void
+  onCaptureImage: (listener: (payload: CaptureImagePayload) => void) => () => void
+  pdfReady: () => void
+  onPdfRender: (listener: (payload: PdfRenderPayload) => void) => () => void
+  sendPdfPage: (id: string, index: number, dataUrl: string) => void
+  finishPdf: (id: string) => void
+  failPdf: (id: string, error: string) => void
   runAI: (request: AIRunRequest) => void
   cancelAI: (requestId: string) => void
   speakText: (text: string, speechId: string, culture?: SpeechCulture) => void

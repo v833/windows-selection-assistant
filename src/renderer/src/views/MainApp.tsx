@@ -32,6 +32,7 @@ import {
   PinOff,
   RefreshCw,
   Save,
+  ScanText,
   Search,
   Settings2,
   Sparkles,
@@ -201,6 +202,8 @@ function GeneralSettings({
   status: AssistantStatus
   save: SaveSettings
 }) {
+  const [ocrShortcutError, setOcrShortcutError] = useState('')
+
   return (
     <SettingsPage title="常规" subtitle="管理划词监听与应用行为">
       <section className="settings-section">
@@ -241,6 +244,29 @@ function GeneralSettings({
         </SettingRow>
         <SettingRow title="新选区时停止" description="开始新的划词后停止上一段朗读，避免声音重叠">
           <Switch checked={settings.speechAutoStop} onChange={(speechAutoStop) => void save({ speechAutoStop })} label="新选区时停止朗读" />
+        </SettingRow>
+      </section>
+
+      <section className="settings-section">
+        <SectionTitle icon={ScanText} title="截图取词" />
+        <SettingRow title="启用截图取词与 PDF 识别" description="选不中文字时（扫描 PDF、图片、受保护窗口），框选屏幕或导入 PDF，在本机识别文字，内容不会离开设备">
+          <Switch checked={settings.ocrEnabled} onChange={(ocrEnabled) => void save({ ocrEnabled })} label="启用截图取词与 PDF 识别" />
+        </SettingRow>
+        <SettingRow title="取词快捷键" description={ocrShortcutError || '全局生效，任意应用内按下即可框选识别'}>
+          <ShortcutInput
+            value={settings.ocrShortcut}
+            onChange={(ocrShortcut) => void save({ ocrShortcut }).then((error) => setOcrShortcutError(error ?? ''))}
+            label="截图取词" />
+        </SettingRow>
+        <SettingRow title="立即使用" description="打开全屏遮罩，拖拽框选后直接识别为文字">
+          <button className="secondary-button compact" type="button" onClick={() => window.selectionAPI.startOcrCapture()}>
+            <ScanText size={14} />开始截图取词
+          </button>
+        </SettingRow>
+        <SettingRow title="识别 PDF" description="选择本地 PDF 识别全部页面文字，扫描版 PDF 也能提取，文件不出设备">
+          <button className="secondary-button compact" type="button" onClick={() => window.selectionAPI.startPdfOcr()}>
+            <FileText size={14} />选择 PDF 识别
+          </button>
         </SettingRow>
       </section>
 
@@ -885,7 +911,7 @@ function ActionRow({
               <ArrowDown size={15} />
             </button>
           </div>
-          <ShortcutInput action={action} onChange={onShortcutChange} />
+          <ShortcutInput value={action.shortcut ?? ''} onChange={onShortcutChange} label={action.label} />
           {canConfigureAI && (
             <button
               className={advanced ? 'icon-button pinned' : 'icon-button'}
@@ -1063,7 +1089,7 @@ function PromptHelp({ prompt, settings }: { prompt: string; settings: AppSetting
   )
 }
 
-function ShortcutInput({ action, onChange }: { action: SelectionAction; onChange: (shortcut: string) => void }) {
+function ShortcutInput({ value, onChange, label }: { value: string; onChange: (shortcut: string) => void; label: string }) {
   function capture(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Tab') return
     event.preventDefault()
@@ -1089,16 +1115,16 @@ function ShortcutInput({ action, onChange }: { action: SelectionAction; onChange
   return (
     <div className="shortcut-control">
       <input
-        value={action.shortcut ?? ''}
+        value={value}
         onKeyDown={capture}
         onFocus={(event) => event.currentTarget.select()}
         readOnly
         placeholder="未设置"
-        aria-label={`设置${action.label}快捷键`}
+        aria-label={`设置${label}快捷键`}
         title="点击后按下组合键"
       />
-      {action.shortcut && (
-        <button className="shortcut-clear" onClick={() => onChange('')} aria-label={`清除${action.label}快捷键`} title="清除快捷键">
+      {value && (
+        <button className="shortcut-clear" onClick={() => onChange('')} aria-label={`清除${label}快捷键`} title="清除快捷键">
           <X size={12} />
         </button>
       )}

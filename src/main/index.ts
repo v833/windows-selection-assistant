@@ -16,7 +16,7 @@ import {
   type NativeImage
 } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { TextSelectionData } from 'selection-hook'
 import { getEnabledActionVariants, resolveActionVariant } from '../shared/actions'
@@ -39,8 +39,11 @@ import type {
   AppSettings,
   AssistantStatus,
   ConversationSession,
+  OcrCaptureRegion,
+  PdfPagePayload,
   SelectionAction,
   SelectionPayload,
+  SelectionSource,
   SessionExportFormat,
   SettingsSection,
   SpeechStatus,
@@ -49,6 +52,7 @@ import type {
 } from '../shared/types'
 import { fitWindowBoundsToArea } from '../shared/windowBounds'
 import { streamCompletion, testConnection } from './ai'
+import { captureDisplayImage, cursorDisplay, OcrService } from './ocr'
 import { SelectionService } from './selection'
 import { SessionStore } from './sessionStore'
 import { SettingsStore } from './settings'
@@ -57,15 +61,25 @@ import { SpeechService } from './speech'
 let mainWindow: BrowserWindow | null = null
 let toolbarWindow: BrowserWindow | null = null
 let resultWindow: BrowserWindow | null = null
+let captureWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let settingsStore: SettingsStore
 let sessionStore: SessionStore
 let selectionService: SelectionService
 let speechService: SpeechService
+let ocrService: OcrService
 let lastSelection: TextSelectionData | null = null
+let lastSelectionSource: SelectionSource = 'selection'
 let pendingAction: ActionPayload | null = null
 let toolbarReady = false
 let resultReady = false
+let captureReady = false
+let captureImage: NativeImage | null = null
+let captureImageData: { dataUrl: string; scale: number } | null = null
+let pdfWindow: BrowserWindow | null = null
+let pdfReady = false
+let pdfJob: { id: string; pages: PdfPagePayload[] } | null = null
+let pendingPdfRender: { id: string; data: Uint8Array; dpi: number } | null = null
 let isQuitting = false
 let resultWindowHasCustomBounds = false
 let ignoreResultBoundsEvents = false
@@ -101,7 +115,7 @@ function applyNativeTheme(theme: AppSettings['theme']): void {
   updateNativeWindowColors()
 }
 
-function loadRenderer(window: BrowserWindow, view: 'main' | 'toolbar' | 'result'): void {
+function loadRenderer(window: BrowserWindow, view: 'main' | 'toolbar' | 'result' | 'capture' | 'pdf'): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     const url = new URL(process.env.ELECTRON_RENDERER_URL)
     url.searchParams.set('view', view)
@@ -217,6 +231,65 @@ function createResultWindow(): BrowserWindow {
   return window
 }
 
+function createCaptureWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: true,
+    focusable: true,
+    resizable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    fullscreenable: false,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  })
+  window.setAlwaysOnTop(true, 'screen-saver')
+  window.on('closed', () => {
+    captureWindow = null
+    captureReady = false
+    captureImage = null
+    captureImageData = null
+  })
+  loadRenderer(window, 'capture')
+  return window
+}
+
+function createPdfWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 800,
+    height: 600,
+    show: false,
+    webPreferences: {
+      preload: preloadPath,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false
+    }
+  })
+  window.webContents.on('render-process-gone', () => {
+    if (pdfJob) {
+      pdfJob = null
+      pendingPdfRender = null
+      tray?.displayBalloon({ title: 'PDF 取词', content: 'PDF 渲染进程异常，请重试。', iconType: 'warning' })
+    }
+  })
+  window.on('closed', () => {
+    pdfWindow = null
+    pdfReady = false
+    pdfJob = null
+    pendingPdfRender = null
+  })
+  loadRenderer(window, 'pdf')
+  return window
+}
+
 function showMainWindow(section?: SettingsSection): void {
   mainWindow ??= createMainWindow()
   if (mainWindow.isMinimized()) mainWindow.restore()
@@ -238,7 +311,8 @@ function selectionPayload(): SelectionPayload | null {
     programName: lastSelection.programName,
     actions: pinned,
     hasMoreActions: overflow.length > 0,
-    theme: settings.theme
+    theme: settings.theme,
+    source: lastSelectionSource
   }
 }
 
@@ -246,6 +320,155 @@ function sendSelection(): void {
   const payload = selectionPayload()
   if (payload && toolbarReady && toolbarWindow && !toolbarWindow.isDestroyed()) {
     toolbarWindow.webContents.send('selection:changed', payload)
+  }
+}
+
+function sendCaptureImage(): void {
+  if (!captureImageData || !captureReady || !captureWindow || captureWindow.isDestroyed()) return
+  captureWindow.webContents.send('capture:image', captureImageData)
+}
+
+async function startOcrCapture(): Promise<void> {
+  if (captureWindow && !captureWindow.isDestroyed() && captureWindow.isVisible()) return
+  const settings = settingsStore.get()
+  if (!settings.ocrEnabled) {
+    tray?.displayBalloon({ title: '截图取词未启用', content: '请在设置中启用截图取词后再使用。', iconType: 'warning' })
+    return
+  }
+  speechService.stop()
+  toolbarWindow?.hide()
+  resultWindow?.hide()
+
+  try {
+    const display = cursorDisplay()
+    const image = await captureDisplayImage(display)
+    const scale = image.getSize().width / Math.max(1, display.bounds.width)
+    captureImage = image
+    captureImageData = { dataUrl: image.toDataURL(), scale }
+    captureWindow ??= createCaptureWindow()
+    const window = captureWindow
+    window.setBounds(display.bounds)
+    window.show()
+    window.focus()
+    sendCaptureImage()
+  } catch (error) {
+    captureImage = null
+    captureImageData = null
+    tray?.displayBalloon({
+      title: '截图取词失败',
+      content: error instanceof Error ? error.message : '无法获取屏幕截图',
+      iconType: 'error'
+    })
+  }
+}
+
+function cancelOcrCapture(): void {
+  captureImage = null
+  captureImageData = null
+  if (captureWindow && !captureWindow.isDestroyed()) captureWindow.hide()
+}
+
+async function handleCaptureRegion(region: OcrCaptureRegion): Promise<void> {
+  const sourceImage = captureImage
+  if (!sourceImage) return
+  const { scale } = captureImageData ?? { scale: 1 }
+  const source = captureWindow
+  if (source && !source.isDestroyed()) source.hide()
+  captureImage = null
+  captureImageData = null
+
+  const imageSize = sourceImage.getSize()
+  const bounds = {
+    x: Math.min(imageSize.width - 1, Math.max(0, Math.round(region.x * scale))),
+    y: Math.min(imageSize.height - 1, Math.max(0, Math.round(region.y * scale))),
+    width: Math.min(imageSize.width, Math.max(1, Math.round(region.width * scale))),
+    height: Math.min(imageSize.height, Math.max(1, Math.round(region.height * scale)))
+  }
+  try {
+    const regionImage = sourceImage.crop(bounds)
+    if (regionImage.isEmpty()) throw new Error('截图区域为空')
+    const lines = await ocrService.recognize(regionImage.toPNG())
+    const text = lines.map((line) => line.text).join('\n').trim()
+    if (!text) {
+      tray?.displayBalloon({ title: '截图取词', content: '未识别到文字，请框选包含文字的清晰区域。', iconType: 'warning' })
+      return
+    }
+    selectionService.showOcrSelection(text)
+  } catch (error) {
+    tray?.displayBalloon({
+      title: '识别失败',
+      content: error instanceof Error ? error.message : '截图取词失败',
+      iconType: 'error'
+    })
+  }
+}
+
+const PDF_RENDER_DPI = 200
+
+async function handlePdfOcr(): Promise<void> {
+  if (!settingsStore.get().ocrEnabled) {
+    tray?.displayBalloon({ title: '取词功能未启用', content: '请在设置中启用截图取词后再使用。', iconType: 'warning' })
+    return
+  }
+  if (pdfJob) return
+  if (captureWindow && !captureWindow.isDestroyed() && captureWindow.isVisible()) captureWindow.hide()
+  speechService.stop()
+  toolbarWindow?.hide()
+
+  const result = await dialog.showOpenDialog({
+    title: '选择要识别的 PDF 文件',
+    properties: ['openFile'],
+    filters: [{ name: 'PDF 文档', extensions: ['pdf'] }]
+  })
+  if (result.canceled || !result.filePaths[0]) return
+
+  let data: Uint8Array
+  try {
+    data = new Uint8Array(await readFile(result.filePaths[0]))
+  } catch (error) {
+    tray?.displayBalloon({ title: 'PDF 读取失败', content: error instanceof Error ? error.message : '无法读取该 PDF', iconType: 'error' })
+    return
+  }
+
+  pdfWindow ??= createPdfWindow()
+  pdfJob = { id: crypto.randomUUID(), pages: [] }
+  pendingPdfRender = { id: pdfJob.id, data, dpi: PDF_RENDER_DPI }
+  sendPdfRender()
+  tray?.displayBalloon({ title: 'PDF 取词', content: '正在识别，完成后将弹出工具栏。', iconType: 'info' })
+}
+
+function sendPdfRender(): void {
+  if (!pendingPdfRender || !pdfReady || !pdfWindow || pdfWindow.isDestroyed()) return
+  const { id, data, dpi } = pendingPdfRender
+  pendingPdfRender = null
+  pdfWindow.webContents.send('pdf:render', { id, data, dpi })
+}
+
+async function finishPdfJob(job: { id: string; pages: PdfPagePayload[] }): Promise<void> {
+  pdfWindow?.hide()
+  try {
+    const chunks: string[] = []
+    for (const page of [...job.pages].sort((a, b) => a.index - b.index)) {
+      const base64 = page.dataUrl.split(',')[1] ?? ''
+      if (!base64) continue
+      const lines = await ocrService.recognize(Buffer.from(base64, 'base64'))
+      const text = lines.map((line) => line.text).join('\n').trim()
+      if (!text) continue
+      if (chunks.length) chunks.push('')
+      chunks.push(text)
+    }
+    const text = chunks.join('\n').trim()
+    if (!text) {
+      tray?.displayBalloon({ title: 'PDF 取词', content: '未识别到文字，请确认 PDF 内容清晰可读。', iconType: 'warning' })
+      return
+    }
+    selectionService.showOcrSelection(text, 'PDF 取词')
+  } catch (error) {
+    tray?.displayBalloon({
+      title: 'PDF 识别失败',
+      content: error instanceof Error ? error.message : '无法识别该 PDF',
+      iconType: 'error'
+    })
   }
 }
 
@@ -308,7 +531,8 @@ function showAction(actionId: string, variantId?: string): void {
     historyEnabled: settings.historyEnabled,
     theme: settings.theme,
     sourceLanguage: detectLanguageLabel(lastSelection.text),
-    targetLanguage: settings.targetLanguage
+    targetLanguage: settings.targetLanguage,
+    source: lastSelectionSource
   }
   toolbarWindow?.hide()
   resultWindow ??= createResultWindow()
@@ -568,21 +792,6 @@ function popupActionMenu(menu: Menu): void {
   }
 }
 
-function applyActionShortcuts(actions: SelectionAction[]): string | null {
-  const validationError = validateActionShortcuts(actions)
-  if (validationError) return validationError
-
-  globalShortcut.unregisterAll()
-  for (const action of actions) {
-    const error = registerActionShortcut(action)
-    if (error) {
-      globalShortcut.unregisterAll()
-      return error
-    }
-  }
-  return null
-}
-
 function applyAvailableActionShortcuts(actions: SelectionAction[]): string[] {
   const validationError = validateActionShortcuts(actions)
   if (validationError) return [validationError]
@@ -608,6 +817,28 @@ function registerActionShortcut(action: SelectionAction): string | null {
     return `无法注册快捷键 ${shortcut}`
   }
   return null
+}
+
+function registerOcrShortcut(shortcut: string): string | null {
+  const normalized = normalizeShortcut(shortcut)
+  if (!normalized) return null
+  try {
+    if (!globalShortcut.register(normalized, () => { void startOcrCapture() })) {
+      return `截图取词快捷键 ${normalized} 已被其他应用占用`
+    }
+  } catch {
+    return `无法注册截图取词快捷键 ${normalized}`
+  }
+  return null
+}
+
+function applyAllShortcuts(settings: AppSettings): string[] {
+  const errors = applyAvailableActionShortcuts(settings.actions)
+  if (settings.ocrEnabled && settings.ocrShortcut) {
+    const error = registerOcrShortcut(settings.ocrShortcut)
+    if (error) errors.push(error)
+  }
+  return errors
 }
 
 function runShortcutAction(actionId: string): void {
@@ -695,19 +926,25 @@ function registerIpc(): void {
         const shortcut = normalizeShortcut(action.shortcut)
         return { ...action, shortcut: shortcut ?? undefined }
       })
-      const shortcutError = applyActionShortcuts(actions)
-      if (shortcutError) {
-        applyActionShortcuts(before.actions)
-        throw new Error(shortcutError)
-      }
       nextPatch = { ...patch, actions }
+    }
+
+    const affectsShortcuts = Boolean(patch.actions)
+      || patch.ocrShortcut !== undefined
+      || patch.ocrEnabled !== undefined
+    if (affectsShortcuts) {
+      const shortcutErrors = applyAllShortcuts({ ...before, ...nextPatch })
+      if (shortcutErrors.length) {
+        applyAllShortcuts(before)
+        throw new Error(shortcutErrors.join('\n'))
+      }
     }
 
     let settings
     try {
       settings = settingsStore.update(nextPatch)
     } catch (error) {
-      if (patch.actions) applyActionShortcuts(before.actions)
+      if (affectsShortcuts) applyAllShortcuts(before)
       throw error
     }
     if (settings.enabled !== before.enabled) selectionService.setEnabled(settings.enabled)
@@ -791,6 +1028,36 @@ function registerIpc(): void {
   ipcMain.on('result:ready', () => {
     resultReady = true
     if (pendingAction && resultWindow) resultWindow.webContents.send('action:payload', pendingAction)
+  })
+  ipcMain.on('ocr:start', () => { void startOcrCapture() })
+  ipcMain.on('ocr:pdf', () => { void handlePdfOcr() })
+  ipcMain.on('capture:ready', () => {
+    captureReady = true
+    sendCaptureImage()
+  })
+  ipcMain.on('capture:region', (_event, region: OcrCaptureRegion) => { void handleCaptureRegion(region) })
+  ipcMain.on('capture:cancel', cancelOcrCapture)
+  ipcMain.on('pdf:ready', () => {
+    pdfReady = true
+    sendPdfRender()
+  })
+  ipcMain.on('pdf:page', (_event, payload: PdfPagePayload) => {
+    if (!pdfJob || pdfJob.id !== payload.id) return
+    pdfJob.pages.push(payload)
+  })
+  ipcMain.on('pdf:done', (_event, id: string) => {
+    if (!pdfJob || pdfJob.id !== id) return
+    const job = pdfJob
+    pdfJob = null
+    pendingPdfRender = null
+    void finishPdfJob(job)
+  })
+  ipcMain.on('pdf:error', (_event, payload: { id: string; error: string }) => {
+    if (!pdfJob || pdfJob.id !== payload.id) return
+    pdfJob = null
+    pendingPdfRender = null
+    pdfWindow?.hide()
+    tray?.displayBalloon({ title: 'PDF 解析失败', content: payload.error || '无法解析该 PDF', iconType: 'error' })
   })
   ipcMain.on('selection:action', (_event, actionId: string, variantId?: string) => showAction(actionId, variantId))
   ipcMain.on('toolbar:more', showMoreActions)
@@ -879,17 +1146,19 @@ app.whenReady().then(() => {
   })
   toolbarWindow = createToolbarWindow()
   speechService = new SpeechService('powershell.exe', broadcastSpeechStatus)
+  ocrService = new OcrService()
   selectionService = new SelectionService(
     () => toolbarWindow,
-    (selection) => {
+    (selection, source) => {
       if (settingsStore.get().speechAutoStop) speechService.stop()
       lastSelection = selection
+      lastSelectionSource = source
       sendSelection()
     },
     broadcastStatus
   )
   registerIpc()
-  const shortcutErrors = applyAvailableActionShortcuts(settingsStore.get().actions)
+  const shortcutErrors = applyAllShortcuts(settingsStore.get())
   createTray()
   reportShortcutErrors(shortcutErrors)
   mainWindow = createMainWindow()
@@ -904,6 +1173,7 @@ app.on('before-quit', () => {
   isQuitting = true
   selectionService?.cleanup()
   speechService?.stop()
+  void ocrService?.dispose()
   if (updateCheckTimer) clearInterval(updateCheckTimer)
   updateCheckTimer = null
   globalShortcut.unregisterAll()

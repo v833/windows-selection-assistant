@@ -52,6 +52,8 @@ const defaults: AppSettings = {
   speechRate: 'normal',
   speechLanguageMode: 'auto',
   speechAutoStop: true,
+  ocrEnabled: true,
+  ocrShortcut: 'Ctrl+Shift+S',
   jsonExtractionSchema: '',
   maxInputCharacters: DEFAULT_MAX_INPUT_CHARACTERS,
   historyEnabled: false,
@@ -112,6 +114,12 @@ export class SettingsStore {
       speechAutoStop: patch.speechAutoStop === undefined
         ? this.settings.speechAutoStop
         : Boolean(patch.speechAutoStop),
+      ocrEnabled: patch.ocrEnabled === undefined
+        ? this.settings.ocrEnabled
+        : Boolean(patch.ocrEnabled),
+      ocrShortcut: normalizeShortcut(patch.ocrShortcut === undefined
+        ? this.settings.ocrShortcut
+        : patch.ocrShortcut) ?? '',
       jsonExtractionSchema: patch.jsonExtractionSchema === undefined
         ? this.settings.jsonExtractionSchema
         : String(patch.jsonExtractionSchema).slice(0, 2000),
@@ -177,6 +185,12 @@ export class SettingsStore {
         speechAutoStop: persisted.speechAutoStop === undefined
           ? defaults.speechAutoStop
           : Boolean(persisted.speechAutoStop),
+        ocrEnabled: persisted.ocrEnabled === undefined
+          ? defaults.ocrEnabled
+          : Boolean(persisted.ocrEnabled),
+        ocrShortcut: normalizeShortcut(typeof persisted.ocrShortcut === 'string'
+          ? persisted.ocrShortcut
+          : '') ?? defaults.ocrShortcut,
         jsonExtractionSchema: typeof persisted.jsonExtractionSchema === 'string'
           ? persisted.jsonExtractionSchema.slice(0, 2000)
           : defaults.jsonExtractionSchema,

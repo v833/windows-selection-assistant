@@ -1,8 +1,8 @@
 import { screen, type BrowserWindow } from 'electron'
 import SelectionHook, { type MouseEventData, type TextSelectionData } from 'selection-hook'
-import type { AssistantStatus } from '../shared/types'
+import type { AssistantStatus, SelectionSource } from '../shared/types'
 
-type SelectionHandler = (selection: TextSelectionData) => void
+type SelectionHandler = (selection: TextSelectionData, source: SelectionSource) => void
 type StatusHandler = (status: AssistantStatus) => void
 
 const TOOLBAR_GAP = 8
@@ -47,6 +47,30 @@ export class SelectionService {
 
   setMenuOpen(open: boolean): void {
     this.menuOpen = open
+  }
+
+  showOcrSelection(text: string, programName = '截图取词'): void {
+    if (!text.trim()) return
+    const cursor = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(cursor)
+    const physical = {
+      x: Math.round((cursor.x - display.bounds.x) * display.scaleFactor + display.bounds.x),
+      y: Math.round((cursor.y - display.bounds.y) * display.scaleFactor + display.bounds.y)
+    }
+    const selection: TextSelectionData = {
+      text,
+      programName,
+      startTop: physical,
+      startBottom: physical,
+      endTop: physical,
+      endBottom: physical,
+      mousePosStart: physical,
+      mousePosEnd: physical,
+      method: SelectionHook.SelectionMethod.NONE,
+      posLevel: SelectionHook.PositionLevel.NONE
+    }
+    this.onSelection(selection, 'ocr')
+    this.showToolbar(selection)
   }
 
   cleanup(): void {
@@ -104,7 +128,7 @@ export class SelectionService {
 
   private handleSelection = (selection: TextSelectionData): void => {
     if (!selection.text.trim()) return
-    this.onSelection(selection)
+    this.onSelection(selection, 'selection')
     this.showToolbar(selection)
   }
 

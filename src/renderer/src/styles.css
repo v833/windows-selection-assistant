@@ -201,6 +201,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .source-header button:hover { color: var(--ink); background: var(--surface-strong); }
 .source-strip p { margin: 8px 0 2px; color: var(--muted); font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .source-strip p.expanded { max-height: 160px; overflow: auto; padding: 8px 9px; border-radius: var(--radius-sm); background: var(--surface); }
+.source-edit { margin-top: 8px; }
+.source-edit textarea { width: 100%; min-height: 108px; padding: 8px 9px; border-radius: var(--radius-sm); font-size: 12.5px; line-height: 1.55; resize: vertical; }
+.source-edit-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 7px; }
+.source-edit-actions button { min-height: 30px; padding: 0 11px; border-radius: var(--radius-sm); color: var(--muted); background: var(--surface-strong); font-size: 11px; font-weight: 650; }
+.source-edit-actions button:hover { color: var(--ink); }
+.source-edit-actions button.primary { color: var(--on-accent); background: var(--accent); }
+.source-edit-actions button.primary:hover { background: var(--accent-hover); }
+.source-header button.active { color: var(--accent-hover); background: var(--accent-soft); }
 .source-strip em { display: block; margin-top: 7px; color: var(--warning); font-size: 10.5px; font-style: normal; }
 .long-text-warning { flex: 0 0 auto; display: flex; align-items: flex-start; gap: 9px; padding: 11px 17px; border-bottom: 1px solid color-mix(in srgb, var(--warning) 24%, var(--line)); color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }
 .long-text-warning > svg { flex: 0 0 auto; margin-top: 1px; }
@@ -350,3 +358,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 
 }
+/* 截图取词遮罩 */
+.capture-loading { min-height: 100vh; display: grid; place-items: center; color: #f4f6fa; background: rgba(0, 0, 0, 0.45); font-size: 13px; }
+.capture-surface { position: relative; width: 100vw; height: 100vh; overflow: hidden; cursor: crosshair; background: #0b0e14; user-select: none; -webkit-user-select: none; }
+.capture-image { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: fill; }
+.capture-box { position: absolute; border: 1.5px solid #4c8bf5; background: rgba(76, 139, 245, 0.08); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45); pointer-events: none; }
+.capture-size { position: absolute; padding: 2px 6px; border-radius: 4px; color: #f4f6fa; background: #4c8bf5; font-size: 11px; font-weight: 600; pointer-events: none; white-space: nowrap; }
+.capture-hint { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); padding: 7px 14px; border-radius: 8px; color: #f4f6fa; background: rgba(0, 0, 0, 0.55); font-size: 12px; pointer-events: none; white-space: nowrap; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); }

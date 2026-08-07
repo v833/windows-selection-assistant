@@ -10,7 +10,11 @@ const hookState = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   screen: {
     screenToDipPoint: (point: { x: number; y: number }) => point,
-    getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    getDisplayNearestPoint: () => ({
+      workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      scaleFactor: 1
+    }),
     getCursorScreenPoint: () => ({ x: 0, y: 0 })
   }
 }))
@@ -19,6 +23,8 @@ vi.mock('selection-hook', () => {
   class MockSelectionHook {
     static FilterMode = { EXCLUDE_LIST: 2 }
     static INVALID_COORDINATE = -99999
+    static SelectionMethod = { NONE: 0 }
+    static PositionLevel = { NONE: 0 }
 
     on(event: string, handler: (...args: unknown[]) => void): this {
       hookState.handlers[event] = handler
@@ -95,6 +101,55 @@ describe('current selection lookup', () => {
     hookState.handlers['mouse-down']?.({ x: 200, y: 200 })
 
     expect(hide).toHaveBeenCalledOnce()
+    service.cleanup()
+  })
+
+  it('injects an OCR selection with its source', () => {
+    const onSelection = vi.fn()
+    const window = {
+      isVisible: () => false,
+      isFocused: () => false,
+      isDestroyed: () => false,
+      getBounds: () => ({ x: 0, y: 0, width: 80, height: 40 }),
+      setPosition: vi.fn(),
+      showInactive: vi.fn(),
+      setAlwaysOnTop: vi.fn(),
+      hide: vi.fn()
+    } as unknown as BrowserWindow
+    const service = new SelectionService(() => window, onSelection, vi.fn())
+    service.setEnabled(true)
+
+    service.showOcrSelection('识别出的文字')
+
+    expect(onSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '识别出的文字', programName: '截图取词' }),
+      'ocr'
+    )
+    expect(window.showInactive).toHaveBeenCalled()
+    service.cleanup()
+  })
+
+  it('allows a custom source label for PDF recognition', () => {
+    const onSelection = vi.fn()
+    const window = {
+      isVisible: () => false,
+      isFocused: () => false,
+      isDestroyed: () => false,
+      getBounds: () => ({ x: 0, y: 0, width: 80, height: 40 }),
+      setPosition: vi.fn(),
+      showInactive: vi.fn(),
+      setAlwaysOnTop: vi.fn(),
+      hide: vi.fn()
+    } as unknown as BrowserWindow
+    const service = new SelectionService(() => window, onSelection, vi.fn())
+    service.setEnabled(true)
+
+    service.showOcrSelection('PDF 内容', 'PDF 取词')
+
+    expect(onSelection).toHaveBeenCalledWith(
+      expect.objectContaining({ programName: 'PDF 取词' }),
+      'ocr'
+    )
     service.cleanup()
   })
 })

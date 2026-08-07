@@ -88,6 +88,35 @@ describe('settings persistence', () => {
     })
   })
 
+  it('enables OCR capture with a default shortcut', () => {
+    const settings = new SettingsStore().get()
+    expect(settings.ocrEnabled).toBe(true)
+    expect(settings.ocrShortcut).toBe('Ctrl+Shift+S')
+  })
+
+  it('persists OCR capture preferences', () => {
+    const store = new SettingsStore()
+    const settings = store.update({
+      ocrEnabled: false,
+      ocrShortcut: 'Ctrl+Shift+O'
+    })
+
+    expect(settings).toMatchObject({
+      ocrEnabled: false,
+      ocrShortcut: 'Ctrl+Shift+O'
+    })
+    expect(new SettingsStore().get()).toMatchObject({
+      ocrEnabled: false,
+      ocrShortcut: 'Ctrl+Shift+O'
+    })
+  })
+
+  it('clears an OCR shortcut without a required modifier', () => {
+    const store = new SettingsStore()
+    const settings = store.update({ ocrShortcut: 'Shift+A' })
+    expect(settings.ocrShortcut).toBe('')
+  })
+
   it('encrypts every provider API key without persisting plaintext', () => {
     const store = new SettingsStore()
     store.update({
