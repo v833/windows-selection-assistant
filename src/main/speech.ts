@@ -38,13 +38,24 @@ export interface SpeechOptions {
   culture?: SpeechCulture
 }
 
+/** macOS `say` 内置语音，按语言文化映射；语音缺失时由 say 报错并回退默认语音。 */
+const MAC_VOICES: Partial<Record<SpeechCulture, string>> = {
+  'zh-CN': 'Tingting',
+  'en-US': 'Samantha',
+  'ja-JP': 'Kyoko',
+  'ko-KR': 'Yuna'
+}
+
+/** macOS `say -r` 语速（每分钟词数），对应 slow / normal / fast。 */
+const MAC_RATE_WPM: Record<SpeechRate, number> = { slow: 140, normal: 175, fast: 210 }
+
 export class SpeechService {
   private child: ChildProcess | null = null
   private statusTimer: NodeJS.Timeout | null = null
   private currentStatus: SpeechStatus = { state: 'idle' }
 
   constructor(
-    private readonly executable = 'powershell.exe',
+    private readonly executable = process.platform === 'win32' ? 'powershell.exe' : 'say',
     private readonly onStatus: (status: SpeechStatus) => void = () => undefined
   ) {}
 
@@ -54,8 +65,12 @@ export class SpeechService {
 
   speak(text: string, speechId: string, options: SpeechOptions): void {
     this.stop()
+    if (process.platform === 'darwin') {
+      this.speakDarwin(text, speechId, options)
+      return
+    }
     if (process.platform !== 'win32') {
-      this.fail(speechId, '朗读仅支持 Windows 系统。')
+      this.fail(speechId, '朗读暂不支持当前系统。')
       return
     }
 
@@ -102,6 +117,57 @@ export class SpeechService {
       cleanup()
       if (code === 0) this.setStatus({ state: 'idle' })
       else this.fail(speechId, 'Windows 语音引擎未能完成朗读，请检查系统语音设置。')
+    })
+  }
+
+  /** macOS 本地朗读：使用系统自带 `say` 命令，文本经 stdin 传入避免转义问题。 */
+  private speakDarwin(text: string, speechId: string, options: SpeechOptions): void {
+    const prepared = prepareSpeechText(text)
+    if (!prepared) return
+    this.setStatus({ state: 'starting', speechId })
+
+    const args = ['-r', String(MAC_RATE_WPM[options.rate])]
+    const culture = options.languageMode === 'auto' ? speechCulture(prepared, options.culture) : undefined
+    const voice = culture ? MAC_VOICES[culture] : undefined
+    if (voice) args.push('-v', voice)
+
+    let child: ChildProcess
+    try {
+      child = spawn(this.executable, args, { stdio: ['pipe', 'ignore', 'ignore'] })
+    } catch (error) {
+      console.error('启动 macOS 本地朗读失败', error)
+      this.fail(speechId, '无法启动 macOS 语音引擎。')
+      return
+    }
+
+    const stdin = child.stdin
+    if (!stdin) {
+      this.fail(speechId, 'macOS 语音引擎未能开始朗读。')
+      return
+    }
+    try {
+      stdin.write(prepared)
+      stdin.end()
+    } catch (error) {
+      console.error('写入 macOS 朗读文本失败', error)
+      this.fail(speechId, 'macOS 语音引擎未能开始朗读。')
+      return
+    }
+
+    this.child = child
+    this.setStatus({ state: 'speaking', speechId })
+    const cleanup = () => {
+      if (this.child === child) this.child = null
+    }
+    child.once('error', (error) => {
+      console.error('macOS 本地朗读失败', error)
+      cleanup()
+      this.fail(speechId, 'macOS 语音引擎不可用。')
+    })
+    child.once('exit', (code) => {
+      cleanup()
+      if (code === 0) this.setStatus({ state: 'idle' })
+      else this.fail(speechId, 'macOS 语音引擎未能完成朗读，可尝试在系统设置中安装语音。')
     })
   }
 

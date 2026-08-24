@@ -8,6 +8,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  Notification,
   safeStorage,
   screen,
   shell,
@@ -277,7 +278,7 @@ function createPdfWindow(): BrowserWindow {
     if (pdfJob) {
       pdfJob = null
       pendingPdfRender = null
-      tray?.displayBalloon({ title: 'PDF 取词', content: 'PDF 渲染进程异常，请重试。', iconType: 'warning' })
+      notify('PDF 取词', 'PDF 渲染进程异常，请重试。')
     }
   })
   window.on('closed', () => {
@@ -332,7 +333,7 @@ async function startOcrCapture(): Promise<void> {
   if (captureWindow && !captureWindow.isDestroyed() && captureWindow.isVisible()) return
   const settings = settingsStore.get()
   if (!settings.ocrEnabled) {
-    tray?.displayBalloon({ title: '截图取词未启用', content: '请在设置中启用截图取词后再使用。', iconType: 'warning' })
+    notify('截图取词未启用', '请在设置中启用截图取词后再使用。')
     return
   }
   speechService.stop()
@@ -354,11 +355,11 @@ async function startOcrCapture(): Promise<void> {
   } catch (error) {
     captureImage = null
     captureImageData = null
-    tray?.displayBalloon({
-      title: '截图取词失败',
-      content: error instanceof Error ? error.message : '无法获取屏幕截图',
-      iconType: 'error'
-    })
+    notify(
+      '截图取词失败',
+      error instanceof Error ? error.message : '无法获取屏幕截图',
+      'error'
+    )
   }
 }
 
@@ -390,16 +391,16 @@ async function handleCaptureRegion(region: OcrCaptureRegion): Promise<void> {
     const lines = await ocrService.recognize(regionImage.toPNG())
     const text = lines.map((line) => line.text).join('\n').trim()
     if (!text) {
-      tray?.displayBalloon({ title: '截图取词', content: '未识别到文字，请框选包含文字的清晰区域。', iconType: 'warning' })
+      notify('截图取词', '未识别到文字，请框选包含文字的清晰区域。')
       return
     }
     selectionService.showOcrSelection(text)
   } catch (error) {
-    tray?.displayBalloon({
-      title: '识别失败',
-      content: error instanceof Error ? error.message : '截图取词失败',
-      iconType: 'error'
-    })
+    notify(
+      '识别失败',
+      error instanceof Error ? error.message : '截图取词失败',
+      'error'
+    )
   }
 }
 
@@ -407,7 +408,7 @@ const PDF_RENDER_DPI = 200
 
 async function handlePdfOcr(): Promise<void> {
   if (!settingsStore.get().ocrEnabled) {
-    tray?.displayBalloon({ title: '取词功能未启用', content: '请在设置中启用截图取词后再使用。', iconType: 'warning' })
+    notify('取词功能未启用', '请在设置中启用截图取词后再使用。')
     return
   }
   if (pdfJob) return
@@ -426,7 +427,7 @@ async function handlePdfOcr(): Promise<void> {
   try {
     data = new Uint8Array(await readFile(result.filePaths[0]))
   } catch (error) {
-    tray?.displayBalloon({ title: 'PDF 读取失败', content: error instanceof Error ? error.message : '无法读取该 PDF', iconType: 'error' })
+    notify('PDF 读取失败', error instanceof Error ? error.message : '无法读取该 PDF', 'error')
     return
   }
 
@@ -434,7 +435,7 @@ async function handlePdfOcr(): Promise<void> {
   pdfJob = { id: crypto.randomUUID(), pages: [] }
   pendingPdfRender = { id: pdfJob.id, data, dpi: PDF_RENDER_DPI }
   sendPdfRender()
-  tray?.displayBalloon({ title: 'PDF 取词', content: '正在识别，完成后将弹出工具栏。', iconType: 'info' })
+  notify('PDF 取词', '正在识别，完成后将弹出工具栏。', 'info')
 }
 
 function sendPdfRender(): void {
@@ -459,16 +460,12 @@ async function finishPdfJob(job: { id: string; pages: PdfPagePayload[] }): Promi
     }
     const text = chunks.join('\n').trim()
     if (!text) {
-      tray?.displayBalloon({ title: 'PDF 取词', content: '未识别到文字，请确认 PDF 内容清晰可读。', iconType: 'warning' })
+      notify('PDF 取词', '未识别到文字，请确认 PDF 内容清晰可读。')
       return
     }
     selectionService.showOcrSelection(text, 'PDF 取词')
   } catch (error) {
-    tray?.displayBalloon({
-      title: 'PDF 识别失败',
-      content: error instanceof Error ? error.message : '无法识别该 PDF',
-      iconType: 'error'
-    })
+    notify('PDF 识别失败', error instanceof Error ? error.message : '无法识别该 PDF', 'error')
   }
 }
 
@@ -853,11 +850,7 @@ function reportShortcutErrors(errors: string[]): void {
   if (!errors.length) return
   const message = [...new Set(errors)].join('\n')
   console.error('部分全局快捷键注册失败', message)
-  tray?.displayBalloon({
-    title: '划词助手快捷键不可用',
-    content: message,
-    iconType: 'warning'
-  })
+  notify('划词助手快捷键不可用', message)
 }
 
 function broadcastStatus(status: AssistantStatus): void {
@@ -912,6 +905,15 @@ function createTray(): void {
   tray.setToolTip('划词助手')
   tray.on('double-click', () => showMainWindow())
   rebuildTrayMenu()
+}
+
+/** 跨平台提示：Windows 用托盘气泡，macOS/Linux 用系统通知。 */
+function notify(title: string, content: string, iconType: 'info' | 'warning' | 'error' = 'warning'): void {
+  if (process.platform === 'win32') {
+    tray?.displayBalloon({ title, content, iconType })
+    return
+  }
+  new Notification({ title, body: content }).show()
 }
 
 function registerIpc(): void {
@@ -1057,7 +1059,7 @@ function registerIpc(): void {
     pdfJob = null
     pendingPdfRender = null
     pdfWindow?.hide()
-    tray?.displayBalloon({ title: 'PDF 解析失败', content: payload.error || '无法解析该 PDF', iconType: 'error' })
+    notify('PDF 解析失败', payload.error || '无法解析该 PDF', 'error')
   })
   ipcMain.on('selection:action', (_event, actionId: string, variantId?: string) => showAction(actionId, variantId))
   ipcMain.on('toolbar:more', showMoreActions)
@@ -1145,7 +1147,7 @@ app.whenReady().then(() => {
     }
   })
   toolbarWindow = createToolbarWindow()
-  speechService = new SpeechService('powershell.exe', broadcastSpeechStatus)
+  speechService = new SpeechService(undefined, broadcastSpeechStatus)
   ocrService = new OcrService()
   selectionService = new SelectionService(
     () => toolbarWindow,
