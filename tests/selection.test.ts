@@ -16,6 +16,9 @@ vi.mock('electron', () => ({
       scaleFactor: 1
     }),
     getCursorScreenPoint: () => ({ x: 0, y: 0 })
+  },
+  systemPreferences: {
+    isTrustedAccessibilityClient: () => true
   }
 }))
 

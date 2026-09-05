@@ -12,6 +12,7 @@ import {
   safeStorage,
   screen,
   shell,
+  systemPreferences,
   Tray,
   type MenuItemConstructorOptions,
   type NativeImage
@@ -185,6 +186,9 @@ function createToolbarWindow(): BrowserWindow {
   })
 
   window.setAlwaysOnTop(true, 'screen-saver')
+  if (process.platform === 'darwin') {
+    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
   loadRenderer(window, 'toolbar')
   return window
 }
@@ -228,6 +232,9 @@ function createResultWindow(): BrowserWindow {
     resultWindow = null
     resultReady = false
   })
+  if (process.platform === 'darwin') {
+    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  }
   loadRenderer(window, 'result')
   return window
 }
@@ -901,7 +908,11 @@ function rebuildTrayMenu(): void {
 
 function createTray(): void {
   const iconPath = app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(process.cwd(), 'resources/icon.png')
-  tray = new Tray(nativeImage.createFromPath(iconPath))
+  let icon = nativeImage.createFromPath(iconPath)
+  if (process.platform === 'darwin') {
+    icon = icon.resize({ width: 18, height: 18 })
+  }
+  tray = new Tray(icon)
   tray.setToolTip('划词助手')
   tray.on('double-click', () => showMainWindow())
   rebuildTrayMenu()
@@ -1165,10 +1176,25 @@ app.whenReady().then(() => {
   reportShortcutErrors(shortcutErrors)
   mainWindow = createMainWindow()
   updateNativeWindowColors()
-  app.setLoginItemSettings({ openAtLogin: initialSettings.launchAtLogin })
+  try {
+    app.setLoginItemSettings({ openAtLogin: initialSettings.launchAtLogin })
+  } catch {
+    // login item may fail in development on macOS
+  }
   selectionService.setEnabled(initialSettings.enabled)
   updateCheckTimer = setInterval(() => { void checkForUpdates() }, 6 * 60 * 60 * 1000)
   setTimeout(() => { void checkForUpdates() }, 5000)
+
+  if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(false)) {
+    systemPreferences.isTrustedAccessibilityClient(true)
+    void dialog.showMessageBox({
+      type: 'warning',
+      title: '需要辅助功能权限',
+      message: '划词助手需要辅助功能权限才能监听屏幕划词。',
+      detail: '系统已弹出授权申请。请前往【系统设置 > 隐私与安全性 > 辅助功能】勾选允许，授权后重新启动应用。',
+      buttons: ['我知道了']
+    })
+  }
 })
 
 app.on('before-quit', () => {
@@ -1180,6 +1206,10 @@ app.on('before-quit', () => {
   updateCheckTimer = null
   globalShortcut.unregisterAll()
   for (const controller of requests.values()) controller.abort()
+})
+
+app.on('activate', () => {
+  showMainWindow()
 })
 
 app.on('window-all-closed', () => {

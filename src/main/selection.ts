@@ -1,4 +1,4 @@
-import { screen, type BrowserWindow } from 'electron'
+import { screen, systemPreferences, type BrowserWindow } from 'electron'
 import SelectionHook, { type MouseEventData, type TextSelectionData } from 'selection-hook'
 import type { AssistantStatus, SelectionSource } from '../shared/types'
 
@@ -18,6 +18,13 @@ export class SelectionService {
     private readonly onSelection: SelectionHandler,
     private readonly onStatus: StatusHandler
   ) {}
+
+  private toDipPoint(point: { x: number; y: number }): { x: number; y: number } {
+    if (typeof screen.screenToDipPoint === 'function') {
+      return screen.screenToDipPoint(point)
+    }
+    return point
+  }
 
   setEnabled(enabled: boolean): AssistantStatus {
     this.enabled = enabled
@@ -82,6 +89,19 @@ export class SelectionService {
   private start(): void {
     if (this.running) return
     try {
+      if (process.platform === 'darwin' && systemPreferences?.isTrustedAccessibilityClient) {
+        const isTrusted = systemPreferences.isTrustedAccessibilityClient(false)
+        if (!isTrusted) {
+          systemPreferences.isTrustedAccessibilityClient(true)
+          this.onStatus({
+            enabled: this.enabled,
+            running: false,
+            error: '需要辅助功能权限：请在“系统设置 > 隐私与安全性 > 辅助功能”中授予权限后重试'
+          })
+          return
+        }
+      }
+
       this.hook ??= new SelectionHook()
       this.hook.on('text-selection', this.handleSelection)
       this.hook.on('mouse-down', this.handleMouseDown)
@@ -127,9 +147,13 @@ export class SelectionService {
   }
 
   private handleSelection = (selection: TextSelectionData): void => {
-    if (!selection.text.trim()) return
-    this.onSelection(selection, 'selection')
-    this.showToolbar(selection)
+    try {
+      if (!selection.text.trim()) return
+      this.onSelection(selection, 'selection')
+      this.showToolbar(selection)
+    } catch (error) {
+      console.error('[SelectionService] 处理选区事件失败:', error)
+    }
   }
 
   private showToolbar(selection: TextSelectionData): void {
@@ -137,7 +161,7 @@ export class SelectionService {
     if (!window || window.isDestroyed()) return
 
     const physicalPoint = this.getAnchor(selection)
-    const point = screen.screenToDipPoint(physicalPoint)
+    const point = this.toDipPoint(physicalPoint)
     const display = screen.getDisplayNearestPoint(point)
     const bounds = window.getBounds()
     const area = display.workArea
@@ -167,7 +191,7 @@ export class SelectionService {
     if (this.menuOpen) return
     const window = this.toolbarWindow()
     if (!window?.isVisible()) return
-    const point = screen.screenToDipPoint({ x: event.x, y: event.y })
+    const point = this.toDipPoint({ x: event.x, y: event.y })
     const bounds = window.getBounds()
     const inside =
       point.x >= bounds.x &&
