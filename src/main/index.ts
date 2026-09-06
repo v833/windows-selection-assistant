@@ -104,11 +104,13 @@ function nativeWindowColors(): { background: string; surface: string; symbols: s
 function updateNativeWindowColors(): void {
   const colors = nativeWindowColors()
   mainWindow?.setBackgroundColor(colors.background)
-  mainWindow?.setTitleBarOverlay({
-    color: colors.background,
-    symbolColor: colors.symbols,
-    height: titleBarHeight
-  })
+  if (process.platform !== 'darwin' && typeof mainWindow?.setTitleBarOverlay === 'function') {
+    mainWindow.setTitleBarOverlay({
+      color: colors.background,
+      symbolColor: colors.symbols,
+      height: titleBarHeight
+    })
+  }
   resultWindow?.setBackgroundColor(colors.surface)
 }
 
